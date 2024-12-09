@@ -20,7 +20,11 @@ height = (ROW_COUNT + 1) * SQUARESIZE
 size = (width, height)
 
 class MCTSNode:
-    pass
+    def __init__(self):
+        self.visits = 0
+        self.value = 0
+        self.children = {}
+        self.parent = None
 
 class MCTSPlayer:
     def choose_move(self, board, iterations=10):
@@ -29,6 +33,18 @@ class MCTSPlayer:
             col = random.randint(0, COLUMN_COUNT - 1)
             valid_move = is_valid_location(board, col)
         return col
+
+    def update_rule(self, node, reward):
+        """
+        Update the node's value and visit count using the formula Q = Q + 1/n * (r - Q)
+        :param node: The node to update
+        :param reward: The reward received
+        """
+        # Update the node's value and visit count
+        node.visits += 1
+        node.value += (reward - node.value) / node.visits
+
+
 
 
 def create_board():
