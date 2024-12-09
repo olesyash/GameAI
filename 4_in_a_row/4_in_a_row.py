@@ -14,13 +14,31 @@ WHITE = (255, 255, 255)
 ROW_COUNT = 6
 COLUMN_COUNT = 7
 SQUARESIZE = 100
+RADIUS = int(SQUARESIZE / 2 - 5)
+width = COLUMN_COUNT * SQUARESIZE
+height = (ROW_COUNT + 1) * SQUARESIZE
+size = (width, height)
+
+class MCTSNode:
+    pass
+
+class MCTSPlayer:
+    def choose_move(self, board, iterations=10):
+        valid_move = False
+        while not valid_move:
+            col = random.randint(0, COLUMN_COUNT - 1)
+            valid_move = is_valid_location(board, col)
+        return col
+
 
 def create_board():
     board = np.zeros((ROW_COUNT, COLUMN_COUNT))
     return board
 
+
 def drop_piece(board, row, col, piece):
     board[row][col] = piece
+
 
 def is_valid_location(board, col):
     # Check if the column is within bounds
@@ -29,10 +47,12 @@ def is_valid_location(board, col):
     # Check if the top cell in the column is empty
     return board[ROW_COUNT-1][col] == 0
 
+
 def get_next_open_row(board, col):
     for r in range(ROW_COUNT):
         if board[r][col] == 0:
             return r
+
 
 def winning_move(board, piece):
     # Check horizontal locations
@@ -61,6 +81,7 @@ def winning_move(board, piece):
 
     return False
 
+
 def draw_board(board):
     for c in range(COLUMN_COUNT):
         for r in range(ROW_COUNT):
@@ -74,6 +95,7 @@ def draw_board(board):
             elif board[r][c] == 2: 
                 pygame.draw.circle(screen, YELLOW, (int(c*SQUARESIZE+SQUARESIZE/2), height-int(r*SQUARESIZE+SQUARESIZE/2)), RADIUS)
     pygame.display.update()
+
 
 def draw_new_game_button(screen, font):
     button_width = 200
@@ -91,18 +113,17 @@ def draw_new_game_button(screen, font):
     
     return pygame.Rect(button_x, button_y, button_width, button_height)
 
+
 def reset_game(board):
     for c in range(COLUMN_COUNT):
         for r in range(ROW_COUNT):
             board[r][c] = 0
     return 0, False  # Reset turn to 0 and game_over to False
 
+
 def handle_player2_move(board, event, myfont, screen):
-    # Randomly select a column
-    valid_move = False
-    while not valid_move:
-        col = random.randint(0, COLUMN_COUNT - 1)
-        valid_move = is_valid_location(board, col)
+    player = MCTSPlayer()
+    col = player.choose_move(board)
     
     game_over = False
     row = get_next_open_row(board, col)
@@ -115,86 +136,97 @@ def handle_player2_move(board, event, myfont, screen):
 
     return True, game_over
 
-board = create_board()
-game_over = False
-turn = 0
 
-pygame.init()
+class ConnectFour:
+    def __init__(self):
+        self.board = create_board()
 
-width = COLUMN_COUNT * SQUARESIZE
-height = (ROW_COUNT+1) * SQUARESIZE
-size = (width, height)
-RADIUS = int(SQUARESIZE/2 - 5)
+    def play(self):
+        game_over = False
+        turn = 0
 
-screen = pygame.display.set_mode(size)
-pygame.display.set_caption('4 in a Row')
-myfont = pygame.font.SysFont("monospace", 75)
-button_font = pygame.font.SysFont("monospace", 36)  # Smaller font for button
+        pygame.init()
 
-draw_board(board)
-pygame.display.update()
 
-while not game_over:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            sys.exit()
 
-        if event.type == pygame.MOUSEMOTION:
-            pygame.draw.rect(screen, BLACK, (0, 0, width, SQUARESIZE))
-            posx = event.pos[0]
-            if turn == 0:
-                pygame.draw.circle(screen, RED, (posx, int(SQUARESIZE/2)), RADIUS)
-            else:
-                pygame.draw.circle(screen, YELLOW, (posx, int(SQUARESIZE/2)), RADIUS)
-            pygame.display.update()
+        global screen # Make screen a global variable so it can be accessed in other functions
+        screen = pygame.display.set_mode(size)
+        pygame.display.set_caption('4 in a Row')
+        myfont = pygame.font.SysFont("monospace", 75)
+        button_font = pygame.font.SysFont("monospace", 36)  # Smaller font for button
 
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            pygame.draw.rect(screen, BLACK, (0, 0, width, SQUARESIZE))
-            # Ask for Player 1 Input
-            if turn == 0:
-                posx = event.pos[0]
-                col = int(math.floor(posx/SQUARESIZE))
-
-                if is_valid_location(board, col):
-                    row = get_next_open_row(board, col)
-                    drop_piece(board, row, col, 1)
-
-                    if winning_move(board, 1):
-                        label = myfont.render("Player 1 wins!!", 1, RED)
-                        screen.blit(label, (40, 10))
-                        game_over = True
-
-                    draw_board(board)
-                    # Only change turns if the move was valid
-                    turn += 1
-                    turn = turn % 2
-
-    # Player 2 (Computer) makes a move automatically when it's their turn
-    if not game_over and turn == 1:
-        pygame.draw.rect(screen, BLACK, (0, 0, width, SQUARESIZE))
-        move_made, game_over = handle_player2_move(board, None, myfont, screen)
-        draw_board(board)
-        turn += 1
-        turn = turn % 2
-        pygame.time.wait(1000)  # Add a small delay to make the computer's moves visible
-
-    if game_over:
-        # Draw the new game button
-        button_rect = draw_new_game_button(screen, button_font)
+        draw_board(self.board)
         pygame.display.update()
-        
-        # Wait for either quit or new game button click
-        waiting_for_input = True
-        while waiting_for_input:
+
+        while not game_over:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     sys.exit()
+
+                if event.type == pygame.MOUSEMOTION:
+                    pygame.draw.rect(screen, BLACK, (0, 0, width, SQUARESIZE))
+                    posx = event.pos[0]
+                    if turn == 0:
+                        pygame.draw.circle(screen, RED, (posx, int(SQUARESIZE/2)), RADIUS)
+                    else:
+                        pygame.draw.circle(screen, YELLOW, (posx, int(SQUARESIZE/2)), RADIUS)
+                    pygame.display.update()
+
                 if event.type == pygame.MOUSEBUTTONDOWN:
-                    mouse_pos = event.pos
-                    if button_rect.collidepoint(mouse_pos):
-                        # Reset the game
-                        turn, game_over = reset_game(board)
-                        pygame.draw.rect(screen, BLACK, (0, 0, width, height))
-                        draw_board(board)
-                        waiting_for_input = False
-                        break
+                    pygame.draw.rect(screen, BLACK, (0, 0, width, SQUARESIZE))
+                    # Ask for Player 1 Input
+                    if turn == 0:
+                        posx = event.pos[0]
+                        col = int(math.floor(posx/SQUARESIZE))
+
+                        if is_valid_location(self.board, col):
+                            row = get_next_open_row(self.board, col)
+                            drop_piece(self.board, row, col, 1)
+
+                            if winning_move(self.board, 1):
+                                label = myfont.render("Player 1 wins!!", 1, RED)
+                                screen.blit(label, (40, 10))
+                                game_over = True
+
+                            draw_board(self.board)
+                            # Only change turns if the move was valid
+                            turn += 1
+                            turn = turn % 2
+
+            # Player 2 (Computer) makes a move automatically when it's their turn
+            if not game_over and turn == 1:
+                pygame.draw.rect(screen, BLACK, (0, 0, width, SQUARESIZE))
+                move_made, game_over = handle_player2_move(self.board, None, myfont, screen)
+                draw_board(self.board)
+                turn += 1
+                turn = turn % 2
+                pygame.time.wait(1000)  # Add a small delay to make the computer's moves visible
+
+            if game_over:
+                # Draw the new game button
+                button_rect = draw_new_game_button(screen, button_font)
+                pygame.display.update()
+
+                # Wait for either quit or new game button click
+                waiting_for_input = True
+                while waiting_for_input:
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT:
+                            sys.exit()
+                        if event.type == pygame.MOUSEBUTTONDOWN:
+                            mouse_pos = event.pos
+                            if button_rect.collidepoint(mouse_pos):
+                                # Reset the game
+                                turn, game_over = reset_game(self.board)
+                                pygame.draw.rect(screen, BLACK, (0, 0, width, height))
+                                draw_board(self.board)
+                                waiting_for_input = False
+                                break
+
+def main():
+    game = ConnectFour()
+    game.play()
+
+
+if __name__ == "__main__":
+    main()
