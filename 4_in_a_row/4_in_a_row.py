@@ -26,8 +26,12 @@ class MCTSNode:
         self.children = {}
         self.parent = None
 
+
 class MCTSPlayer:
-    def choose_move(self, board, iterations=10):
+    def __init__(self, iterations=10):
+        self.iterations = iterations
+
+    def choose_move(self, board):
         valid_move = False
         while not valid_move:
             col = random.randint(0, COLUMN_COUNT - 1)
