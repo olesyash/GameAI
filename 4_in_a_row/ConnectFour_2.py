@@ -134,6 +134,7 @@ class ConnectFour:
         """Check if the game has ended in a win or draw."""
         # The game is terminal if there's a winner or the board is full (draw).
         return self.status in {self.RED_WIN, self.YELLOW_WIN, self.DRAW}
+
     def get_reward(self):
         """Returns the reward for the current game state."""
         if self.status == self.RED_WIN:
@@ -248,7 +249,7 @@ def draw_board(screen, game):
 def main():
     pygame.display.set_caption('Connect 4 with AI')
     game = ConnectFour()
-    mcts = MCTS()
+    mcts = MCTS(exploration_weight=1.4)
     
     # Initial board draw
     screen.fill(BLACK)
@@ -288,7 +289,7 @@ def main():
                     # AI move
                     if game.player == game.YELLOW:
                         pygame.time.wait(500)  # Small delay for better visualization
-                        best_node = mcts.search(game, iterations=1000)
+                        best_node = mcts.search(game.clone(), iterations=3000)
                         game.make(best_node.state.last_move)
                         screen.fill(BLACK)
                         draw_board(screen, game)
@@ -313,6 +314,7 @@ def main():
         pygame.time.wait(3000)
     
     pygame.quit()
+
 
 if __name__ == "__main__":
     main()
