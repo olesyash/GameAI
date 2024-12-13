@@ -20,9 +20,10 @@ class Node:
         best = max(
             self.children,
             key=lambda child: child.value / (child.visits + 1e-6) +
-                              exploration_weight * math.sqrt(math.log(self.visits + 1) / (child.visits + 1e-6))
-        )
+                              exploration_weight * math.sqrt(math.log(self.visits + 1)
+                                                             / (child.visits + 1e-6)))
         return best
+
 
 # Define the MCTS algorithm
 class MCTS:
@@ -224,7 +225,7 @@ def main():
                 best_node = mcts.search(game.clone(), iterations=1000)
                 move = best_node.state.last_move  # Extract the move leading to the best state
                 game.make(move)
-                print(f"YELLOW chose column {move}")
+                print(f"RED chose column {move}")
 
         except ValueError:
             print("Invalid input. Enter a number between 0 and 6.")
@@ -238,6 +239,7 @@ def main():
         print("\nYELLOW (Player 2) wins!")
     else:
         print("\nIt's a draw!")
+
 
 if __name__ == "__main__":
     main()
