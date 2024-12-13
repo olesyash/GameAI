@@ -224,7 +224,7 @@ def main():
                 best_node = mcts.search(game.clone(), iterations=1000)
                 move = best_node.state.last_move  # Extract the move leading to the best state
                 game.make(move)
-                print(f"YELLOW chose column {move}")
+                print(f"RED chose column {move}")
 
         except ValueError:
             print("Invalid input. Enter a number between 0 and 6.")
