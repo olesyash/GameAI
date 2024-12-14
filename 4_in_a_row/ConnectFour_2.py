@@ -84,6 +84,7 @@ class MCTS:
 
     def backpropagate(self, node, state, reward):
         """Backpropagation phase: Update the node values and visits up the tree."""
+        reward = 0 if reward == state.player else 1
         while node is not None:
             node.visits += 1
             if node.parent is not None and node.state.player == node.parent.state.player:
