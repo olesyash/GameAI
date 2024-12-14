@@ -1,5 +1,7 @@
 import math
 import random
+from copy import deepcopy
+
 import pygame
 import sys
 
@@ -37,7 +39,7 @@ class MCTS:
 
         for _ in range(iterations):
             # 1. Selection: Traverse the tree using UCT until reaching a leaf node.
-            node = self.select(root)
+            node, state = self.select(root)
 
             # 2. Expansion: Add a new child node by exploring an unvisited move.
             if not node.state.is_terminal():
@@ -47,16 +49,17 @@ class MCTS:
             reward = self.simulate(node)
 
             # 4. Backpropagation: Update the value and visit counts up the tree.
-            self.backpropagate(node, reward)
+            self.backpropagate(node, state, reward)
 
         # Return the best child node (without exploration weight).
         return root.best_child(exploration_weight=0)
 
     def select(self, node):
         """Selection phase: Navigate the tree using UCT."""
+        state = deepcopy(node.state)
         while not node.state.is_terminal() and node.is_fully_expanded():
             node = node.best_child(self.exploration_weight)
-        return node
+        return node, state
 
     def expand(self, node):
         """Expansion phase: Add a new child node for an unvisited move."""
@@ -79,11 +82,14 @@ class MCTS:
             current_state.make(move)
         return current_state.get_reward()
 
-    def backpropagate(self, node, reward):
+    def backpropagate(self, node, state, reward):
         """Backpropagation phase: Update the node values and visits up the tree."""
         while node is not None:
             node.visits += 1
-            node.value += reward
+            if node.parent is not None and node.state.player == node.parent.state.player:
+                node.value += reward
+            else:
+                node.value -= reward
             node = node.parent
 
 class Node:

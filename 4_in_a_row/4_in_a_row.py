@@ -163,8 +163,6 @@ class ConnectFour:
 
         pygame.init()
 
-
-
         global screen # Make screen a global variable so it can be accessed in other functions
         screen = pygame.display.set_mode(size)
         pygame.display.set_caption('4 in a Row')
