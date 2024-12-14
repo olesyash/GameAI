@@ -27,30 +27,6 @@ YELLOW = (255, 255, 0)
 ROWS = 6
 COLS = 7
 
-# Define the Connect Four game state
-# Define the MCTS Node
-class Node:
-    def __init__(self, state, parent=None):
-        self.state = state  # The game state
-        self.parent = parent  # Parent node
-        self.children = []  # Child nodes
-        self.visits = 0  # Number of times this node was visited
-        self.value = 0  # Total reward accumulated for this node
-
-    def is_fully_expanded(self):
-        """Checks if all possible moves have been expanded."""
-        return len(self.children) == len(self.state.legal_moves())
-
-    def best_child(self, exploration_weight=1):
-        """Selects the best child node based on UCT (Upper Confidence Bound for Trees)."""
-        best = max(
-            self.children,
-            key=lambda child: child.value / (child.visits + 1e-6) +
-                              exploration_weight * math.sqrt(math.log(self.visits + 1) / (child.visits + 1e-6))
-        )
-        return best
-
-# Define the MCTS algorithm
 class MCTS:
     def __init__(self, exploration_weight=1):
         self.exploration_weight = exploration_weight
@@ -109,7 +85,35 @@ class MCTS:
             node.visits += 1
             node.value += reward
             node = node.parent
-    
+
+class Node:
+    def __init__(self, state, parent=None):
+        self.state = state  # The game state
+        self.parent = parent  # Parent node
+        self.children = []  # Child nodes
+        self.visits = 0  # Number of times this node was visited
+        self.value = 0  # Total reward accumulated for this node
+
+    def is_fully_expanded(self):
+        """Checks if all possible moves have been expanded."""
+        return len(self.children) == len(self.state.legal_moves())
+
+    def get_value(self, exploration_weight):
+        if self.visits == 0:
+            # we prioritize nodes that are not explored
+            return 0 if exploration_weight == 0 else float('inf')
+        else:
+            return self.value / self.visits + exploration_weight * math.sqrt(math.log(self.parent.visits) / self.visits)
+
+    def best_child(self, exploration_weight=1.4):
+        """Selects the best child node based on UCT (Upper Confidence Bound for Trees)."""
+        max_value = max(self.children, key=lambda n: n.get_value(exploration_weight)).get_value(exploration_weight)
+        # select nodes with the highest UCT value
+        max_nodes = [n for n in self.children if n.get_value(exploration_weight) == max_value]
+        # randomly select on to expand upon
+        best = random.choice(max_nodes)
+        return best
+
     
 class ConnectFour:
     # Some constants that I want to use to fill the board.
@@ -289,7 +293,7 @@ def main():
                     # AI move
                     if game.player == game.YELLOW:
                         pygame.time.wait(500)  # Small delay for better visualization
-                        best_node = mcts.search(game.clone(), iterations=3000)
+                        best_node = mcts.search(game.clone(), iterations=20000)
                         game.make(best_node.state.last_move)
                         screen.fill(BLACK)
                         draw_board(screen, game)
