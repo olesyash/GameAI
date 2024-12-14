@@ -12,7 +12,7 @@ pygame.init()
 ROW_COUNT = 6
 COLUMN_COUNT = 7
 SQUARE_SIZE = 100
-RADIUS = int(SQUARE_SIZE/2 - 5)
+RADIUS = int(SQUARE_SIZE / 2 - 5)
 
 # Calculate screen dimensions
 width = COLUMN_COUNT * SQUARE_SIZE
@@ -28,6 +28,7 @@ YELLOW = (255, 255, 0)
 # Game Constants
 ROWS = 6
 COLS = 7
+
 
 class MCTS:
     def __init__(self, exploration_weight=1):
@@ -73,7 +74,6 @@ class MCTS:
                 return child_node
         raise Exception("No moves to expand")
 
-
     def simulate(self, node):
         """Simulation phase: Play a random game until a terminal state is reached."""
         current_state = node.state.clone()  # Clone the state for simulation
@@ -91,6 +91,7 @@ class MCTS:
             else:
                 node.value -= reward
             node = node.parent
+
 
 class Node:
     def __init__(self, state, parent=None):
@@ -120,7 +121,7 @@ class Node:
         best = random.choice(max_nodes)
         return best
 
-    
+
 class ConnectFour:
     # Some constants that I want to use to fill the board.
     RED = 1
@@ -132,7 +133,7 @@ class ConnectFour:
     YELLOW_WIN = -1
     DRAW = 0
     ONGOING = -17  # Completely arbitrary
-    
+
     def __init__(self):
         self.board = [[self.EMPTY for _ in range(6)] for _ in range(7)]
         self.heights = [0 for _ in range(7)]  # The column heights in the board.
@@ -162,7 +163,7 @@ class ConnectFour:
 
     def make(self, move):  # Assumes that 'move' is a legal move
         self.last_move = move
-        self.board[move][self.heights[move]] = self.player        
+        self.board[move][self.heights[move]] = self.player
         self.heights[move] += 1
         # Check if the current move results in a winner:
         if self.winning_move(move):
@@ -188,7 +189,6 @@ class ConnectFour:
         clone.player = self.player
         clone.status = self.status
         return clone
-    
 
     def winning_move(self, move):
         # Checks if the move that was just made wins the game.
@@ -200,7 +200,7 @@ class ConnectFour:
 
         # Check all four directions: horizontal, vertical, and two diagonals
         # Directions: (dx, dy) pairs for all 4 possible win directions
-        directions = [(1, 0), (0, 1), (1, 1), (1, -1)]   
+        directions = [(1, 0), (0, 1), (1, 1), (1, -1)]
         for dx, dy in directions:
             count = 0
             x, y = col + dx, row + dy
@@ -235,79 +235,81 @@ class ConnectFour:
             rows.append(" ".join(row))
         return "\n".join(rows)
 
+
 def draw_board(screen, game):
     # Draw the game board
     for c in range(COLUMN_COUNT):
         for r in range(ROW_COUNT):
             # Draw blue rectangle for each cell
-            pygame.draw.rect(screen, BLUE, (c*SQUARE_SIZE, r*SQUARE_SIZE + SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE))
+            pygame.draw.rect(screen, BLUE, (c * SQUARE_SIZE, r * SQUARE_SIZE + SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE))
             # Draw black circle for empty cells
-            pygame.draw.circle(screen, BLACK, (int(c*SQUARE_SIZE + SQUARE_SIZE/2), 
-                                            int(r*SQUARE_SIZE + SQUARE_SIZE + SQUARE_SIZE/2)), RADIUS)
-    
+            pygame.draw.circle(screen, BLACK, (int(c * SQUARE_SIZE + SQUARE_SIZE / 2),
+                                               int(r * SQUARE_SIZE + SQUARE_SIZE + SQUARE_SIZE / 2)), RADIUS)
+
     # Draw the pieces
     for c in range(COLUMN_COUNT):
         for r in range(ROW_COUNT):
             if game.board[c][r] == game.RED:
-                pygame.draw.circle(screen, RED, (int(c*SQUARE_SIZE + SQUARE_SIZE/2), 
-                                               height - int(r*SQUARE_SIZE + SQUARE_SIZE/2)), RADIUS)
+                pygame.draw.circle(screen, RED, (int(c * SQUARE_SIZE + SQUARE_SIZE / 2),
+                                                 height - int(r * SQUARE_SIZE + SQUARE_SIZE / 2)), RADIUS)
             elif game.board[c][r] == game.YELLOW:
-                pygame.draw.circle(screen, YELLOW, (int(c*SQUARE_SIZE + SQUARE_SIZE/2), 
-                                                  height - int(r*SQUARE_SIZE + SQUARE_SIZE/2)), RADIUS)
+                pygame.draw.circle(screen, YELLOW, (int(c * SQUARE_SIZE + SQUARE_SIZE / 2),
+                                                    height - int(r * SQUARE_SIZE + SQUARE_SIZE / 2)), RADIUS)
     pygame.display.update()
+
 
 def main():
     pygame.display.set_caption('Connect 4 with AI')
     game = ConnectFour()
     mcts = MCTS(exploration_weight=1.4)
-    
+
     # Initial board draw
     screen.fill(BLACK)
     draw_board(screen, game)
     pygame.display.update()
-    
+
     # Game loop
     game_over = False
-    
+
     while not game_over:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 sys.exit()
-            
+
             if event.type == pygame.MOUSEMOTION and game.player == game.RED:
                 # Clear the top row
                 pygame.draw.rect(screen, BLACK, (0, 0, width, SQUARE_SIZE))
                 # Draw the piece preview
                 posx = event.pos[0]
-                pygame.draw.circle(screen, RED, (posx, int(SQUARE_SIZE/2)), RADIUS)
+                pygame.draw.circle(screen, RED, (posx, int(SQUARE_SIZE / 2)), RADIUS)
                 pygame.display.update()
-            
+
             if event.type == pygame.MOUSEBUTTONDOWN and game.player == game.RED:
                 # Human player move
                 posx = event.pos[0]
                 col = int(posx // SQUARE_SIZE)
-                
+
                 if col in game.legal_moves():
                     game.make(col)
                     screen.fill(BLACK)
                     draw_board(screen, game)
-                    
+
                     if game.is_terminal():
                         game_over = True
                         break
-                    
+
                     # AI move
                     if game.player == game.YELLOW:
                         pygame.time.wait(500)  # Small delay for better visualization
-                        best_node = mcts.search(game.clone(), iterations=20000)
+                        best_node = mcts.search(game.clone(), iterations=40000)
                         game.make(best_node.state.last_move)
                         screen.fill(BLACK)
                         draw_board(screen, game)
-                        
+
                         if game.is_terminal():
                             game_over = True
                             break
-    
+
     # Game over screen
     if game.is_terminal():
         font = pygame.font.Font(None, 75)
@@ -317,12 +319,12 @@ def main():
             text = font.render("AI Wins!", True, YELLOW)
         else:
             text = font.render("Draw!", True, BLUE)
-        
-        text_rect = text.get_rect(center=(width/2, height/2))
+
+        text_rect = text.get_rect(center=(width / 2, height / 2))
         screen.blit(text, text_rect)
         pygame.display.update()
         pygame.time.wait(3000)
-    
+
     pygame.quit()
 
 
