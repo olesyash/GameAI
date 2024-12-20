@@ -271,13 +271,14 @@ def main():
 
     # Game loop
     game_over = False
+    ai_making_move = False
 
     while not game_over:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 sys.exit()
 
-            if event.type == pygame.MOUSEMOTION and game.player == game.RED:
+            if event.type == pygame.MOUSEMOTION and game.player == game.RED and not ai_making_move:
                 # Clear the top row
                 pygame.draw.rect(screen, BLACK, (0, 0, width, SQUARE_SIZE))
                 # Draw the piece preview
@@ -285,7 +286,7 @@ def main():
                 pygame.draw.circle(screen, RED, (posx, int(SQUARE_SIZE / 2)), RADIUS)
                 pygame.display.update()
 
-            if event.type == pygame.MOUSEBUTTONDOWN and game.player == game.RED:
+            if event.type == pygame.MOUSEBUTTONDOWN and game.player == game.RED and not ai_making_move:
                 # Human player move
                 posx = event.pos[0]
                 col = int(posx // SQUARE_SIZE)
@@ -301,11 +302,12 @@ def main():
 
                     # AI move
                     if game.player == game.YELLOW:
-                        pygame.time.wait(500)  # Small delay for better visualization
+                        ai_making_move = True
                         best_node = mcts.search(game.clone(), iterations=40000)
                         game.make(best_node.state.last_move)
                         screen.fill(BLACK)
                         draw_board(screen, game)
+                        ai_making_move = False
 
                         if game.is_terminal():
                             game_over = True
