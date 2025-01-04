@@ -84,7 +84,7 @@ class MCTS:
 
 mcts = MCTS()
 
-mcts.train(epochs=1000, epsilon=0.1)
+mcts.train(epochs=2000, epsilon=0.1)
 
 statistics = {}
 epochs = 100
