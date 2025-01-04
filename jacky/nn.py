@@ -1,4 +1,5 @@
 from random import randint
+from uu import encode
 
 import pandas as pd
 from sklearn.preprocessing import OneHotEncoder
@@ -7,7 +8,7 @@ from consts import *
 import numpy as np
 from jacky import Game
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import ReLU
+from tensorflow.keras.layers import Dense, ReLU
 from tensorflow.keras.optimizers import Adam
 
 class NN():
@@ -25,10 +26,15 @@ class NN():
         learning_rate = 0.001
         optimizer = Adam(learning_rate=learning_rate)
 
-        model = Sequential()
-        model.add(ReLU(32))
-        model.compile(loss='categorical_crossentropy', optimizer=optimizer, metrics=['accuracy'])
+        model = Sequential([
+            Dense(32, input_shape=(3,)),  # Input features: state, reward, original_reward
+            ReLU(),
+            Dense(16),
+            ReLU(),
+            Dense(1)  # Output is a single value (reward prediction)
+        ])
 
+        model.compile(loss='mse', optimizer=optimizer, metrics=['mae'])
         self.model = model
 
     def choose_action(self, game, epsilon):
@@ -40,16 +46,25 @@ class NN():
         if randint(0, 100) < epsilon * 100:
             # In epsilon we will do a random action
             return HIT if randint(0, 1) == 0 else STAY
-        return HIT if randint(0, 1) == 0 else STAY
-        # else:
-        #     # In (1-epsilon) we will do the best action
-        #     return self.best_action(game)
-
+        else:
+            # In (1-epsilon) we will do the best action
+            return self.best_action(game)
 
     def best_action(self, game):
-        self.model.predict(np.array([game.my_moves]))
+        """
+        The best action is the action that maximizes the predicted reward
+        """
 
-    def train(self, epochs=100, epsilon=0.1):
+        my_current_reward = game.check_reward(game.my_moves[-1])
+        df = encode_states(game.my_moves, my_current_reward, game.rewards)
+        prediction = self.model.predict(df)
+        current_state_prediction = prediction[game.sum][0]  # Get prediction for current sum
+        if current_state_prediction > my_current_reward:
+            return HIT
+        else:
+            return STAY
+
+    def train(self, epochs=10, epsilon=0.1):
         statistics = {}
         for i in range(epochs):
             jacky_game = Game(random=True)
@@ -60,10 +75,14 @@ class NN():
                 # make move
                 jacky_game.make_move(action)
 
-            # encode the statest to df
-            df = encode_states(jacky_game.my_moves, jacky_game.reward, jacky_game.rewards)
+            # encode the states to df
+            X = encode_states(jacky_game.my_moves, jacky_game.reward, jacky_game.rewards)
+            
+            # Convert DataFrame to numpy array
+            y = encode_reward(X, jacky_game.reward)
+            
             # train the model
-            self.model.fit(df, jacky_game.reward, epochs=10, verbose=1)
+            self.model.fit(X, y, epochs=1, verbose=1)
 
         #     # Check status
         #     if jacky_game.reward == 0:
@@ -75,6 +94,12 @@ class NN():
         # print("Average reward:", sum(statistics.values()) / epochs)
         # print("Loosed games:", len([x for x in statistics.values() if x == 0]))
 
+    def play(self):
+        game = Game(random=True)
+        while game.status == ONGOING:
+            move = self.choose_action(game, 0)
+            game.make_move(move)
+        return game.reward
 
 
 def encode_states(states, result, original_rewards):
@@ -88,12 +113,24 @@ def encode_states(states, result, original_rewards):
         }
         rows.append(row)
     new_df = pd.concat([new_df, pd.DataFrame(rows)], ignore_index=True)
+    new_df = new_df[['state', 'reward', 'original_reward']].values.astype('float32')
     return new_df
+
+
+def encode_reward(X, reward):
+    return np.array([reward] * len(X), dtype='float32').reshape(-1, 1)
 
 
 def main():
     nn = NN()
     nn.train()
+    statistics = {}
+    epochs = 100
+    for i in range(epochs):
+        reward = nn.play()
+        statistics[i] = reward
+    print("Average reward:", sum(statistics.values()) / epochs)
+    print("Loosed games:", len([x for x in statistics.values() if x == 0]))
 
 
 if __name__ == "__main__":
