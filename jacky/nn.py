@@ -13,25 +13,21 @@ from tensorflow.keras.optimizers import Adam
 
 class NN():
     def __init__(self):
-        # Initialize neural network with random weights
-        self.Q = {}
-        self.N = {}
-        # Fill up the dictionary for all possible visits
-        for i in range(0, JACKPOT + 1):
-            for j in [HIT, STAY]:
-                self.N[(i, j)] = 0
-        print(self.N)
-
-        # Set the learning rate
+        # Set the learning rate and create optimizer with decay
         learning_rate = 0.001
         optimizer = Adam(learning_rate=learning_rate)
 
+        # Create a deeper network
         model = Sequential([
-            Dense(32, input_shape=(3,)),  # Input features: state, reward, original_reward
+            Dense(64, input_shape=(3,)),
+            ReLU(),
+            Dense(32),
+            ReLU(),
+            Dense(32),
             ReLU(),
             Dense(16),
             ReLU(),
-            Dense(1)  # Output is a single value (reward prediction)
+            Dense(1)
         ])
 
         model.compile(loss='mse', optimizer=optimizer, metrics=['mae'])
@@ -64,7 +60,7 @@ class NN():
         else:
             return STAY
 
-    def train(self, epochs=10, epsilon=0.1):
+    def train(self, epochs=5, epsilon=0.1):
         statistics = {}
         for i in range(epochs):
             jacky_game = Game(random=True)
@@ -77,7 +73,7 @@ class NN():
 
             # encode the states to df
             X = encode_states(jacky_game.my_moves, jacky_game.reward, jacky_game.rewards)
-            
+                
             # Convert DataFrame to numpy array
             y = encode_reward(X, jacky_game.reward)
             
@@ -123,7 +119,8 @@ def encode_reward(X, reward):
 
 def main():
     nn = NN()
-    nn.train()
+    for i in range(1000):
+        nn.train()
     statistics = {}
     epochs = 100
     for i in range(epochs):
