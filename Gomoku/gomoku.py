@@ -11,7 +11,7 @@ class Gomoku:
         self.board = np.zeros((board_size, board_size), dtype=int)
         self.current_player = 1  # 1 for black, 2 for white
         self.move_history = []
-        self.game_over = False
+        self.status = -17  # -17 for ongoing, will be player number (1 or 2) when won, or 0 for draw
         self.winner = None
 
     def reset(self):
@@ -19,7 +19,7 @@ class Gomoku:
         self.board = np.zeros((self.board_size, self.board_size), dtype=int)
         self.current_player = 1
         self.move_history.clear()
-        self.game_over = False
+        self.status = -17
         self.winner = None
 
     def is_legal_move(self, row, col):
@@ -49,7 +49,7 @@ class Gomoku:
         Returns:
             bool: True if move was successful, False otherwise
         """
-        if not self.is_legal_move(row, col) or self.game_over:
+        if not self.is_legal_move(row, col) or self.status != -17:
             return False
 
         self.board[row, col] = self.current_player
@@ -57,10 +57,10 @@ class Gomoku:
 
         # Check for win
         if self._check_win(row, col):
-            self.game_over = True
+            self.status = self.current_player
             self.winner = self.current_player
         elif len(self.move_history) == self.board_size * self.board_size:
-            self.game_over = True  # Draw
+            self.status = 0  # Draw
 
         # Switch player
         self.current_player = 3 - self.current_player  # Switches between 1 and 2
@@ -74,7 +74,7 @@ class Gomoku:
         row, col = self.move_history.pop()
         self.board[row, col] = 0
         self.current_player = 3 - self.current_player
-        self.game_over = False
+        self.status = -17
         self.winner = None
         return True
 
@@ -144,7 +144,7 @@ class Gomoku:
         Returns:
             bool: True if game is over, False otherwise
         """
-        return self.game_over
+        return self.status != -17
 
     def get_winner(self):
         """Get the winner of the game.
