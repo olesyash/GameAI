@@ -48,21 +48,41 @@ class NN():
 
     def best_action(self, game):
         """
-        The best action is the action that maximizes the predicted reward
+        Choose the best action using Q-learning principles:
+        - For each action, estimate Q(s,a) = immediate_reward + gamma * future_reward
+        - Choose the action with highest Q-value
         """
-
-        my_current_reward = game.check_reward(game.my_moves[-1])
-        df = encode_states(game.my_moves, my_current_reward, game.rewards)
-        prediction = self.model.predict(df)
-        current_state_prediction = prediction[game.sum][0]  # Get prediction for current sum
-        if current_state_prediction > my_current_reward:
-            return HIT
-        else:
+        gamma = 0.95  # discount factor for future rewards
+        
+        # Estimate Q-value for STAY
+        stay_reward = game.check_reward(game.my_moves[-1])
+        q_stay = stay_reward / JACKPOT  # normalized reward
+        
+        # Estimate Q-value for HIT
+        possible_next_cards = list(range(1, 11))  # cards 1-10
+        q_hit = 0
+        valid_futures = 0
+        
+        # Simulate possible next states
+        for card in possible_next_cards:
+            next_sum = game.sum + card
+            if next_sum <= JACKPOT:  # only consider valid future states
+                valid_futures += 1
+                immediate_reward = game.rewards[card] / JACKPOT if game.random else next_sum / JACKPOT
+                # Get future value estimation
+                future_state = encode_states([next_sum], immediate_reward, game.rewards)
+                future_value = self.model.predict(future_state, verbose=0)[0][0]
+                q_hit += (immediate_reward + gamma * future_value) / 10  # average over possible cards
+        
+        if valid_futures == 0:  # if no valid future states
             return STAY
+            
+        # Choose action with highest Q-value
+        return HIT if q_hit > q_stay else STAY
 
     def train(self, epochs=5, epsilon=0.1):
-        statistics = {}
         for i in range(epochs):
+            print("Epoch:", i)
             jacky_game = Game(random=True)
             while jacky_game.status == ONGOING:
                 # Choose action
@@ -80,15 +100,10 @@ class NN():
             # train the model
             self.model.fit(X, y, epochs=1, verbose=1)
 
-        #     # Check status
-        #     if jacky_game.reward == 0:
-        #         print("You lost!")
-        #     else:
-        #         print(f"You won {jacky_game.reward} coins!")
-        #     statistics[i] = jacky_game.reward
-        # print(statistics)
-        # print("Average reward:", sum(statistics.values()) / epochs)
-        # print("Loosed games:", len([x for x in statistics.values() if x == 0]))
+            # Save model
+            self.model.save("model.h5")
+            
+
 
     def play(self):
         game = Game(random=True)
@@ -103,9 +118,9 @@ def encode_states(states, result, original_rewards):
     rows = []
     for i in range(0, 22):
         row = {
-            'state': i,
-            'reward': result if i in states else 0,
-            'original_reward': original_rewards[i]
+            'state': i / JACKPOT,
+            'reward': result / JACKPOT if i in states else 0,
+            'original_reward': original_rewards[i] / JACKPOT
         }
         rows.append(row)
     new_df = pd.concat([new_df, pd.DataFrame(rows)], ignore_index=True)
@@ -114,13 +129,19 @@ def encode_states(states, result, original_rewards):
 
 
 def encode_reward(X, reward):
-    return np.array([reward] * len(X), dtype='float32').reshape(-1, 1)
+    return np.array([reward / JACKPOT] * len(X), dtype='float32').reshape(-1, 1)
 
 
 def main():
     nn = NN()
-    for i in range(1000):
-        nn.train()
+    # try load the model
+    try:
+        nn.model.load_weights("model.h5")
+    except:
+        print("Model not found")
+    
+    
+    nn.train(epochs=1000)
     statistics = {}
     epochs = 100
     for i in range(epochs):
