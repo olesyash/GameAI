@@ -8,7 +8,7 @@ from consts import *
 import numpy as np
 from jacky import Game
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, ReLU
+from tensorflow.keras.layers import Dense, ReLU, Input
 from tensorflow.keras.optimizers import Adam
 
 class NN():
@@ -19,7 +19,8 @@ class NN():
 
         # Create a deeper network
         model = Sequential([
-            Dense(64, input_shape=(3,)),
+            Input(shape=(66,)),
+            Dense(64),
             ReLU(),
             Dense(32),
             ReLU(),
@@ -55,7 +56,7 @@ class NN():
         gamma = 0.95  # discount factor for future rewards
         
         # Estimate Q-value for STAY
-        stay_reward = game.check_reward(game.my_moves[-1])
+        stay_reward = game.check_reward()
         q_stay = stay_reward / JACKPOT  # normalized reward
         
         # Estimate Q-value for HIT
@@ -101,7 +102,7 @@ class NN():
             self.model.fit(X, y, epochs=1, verbose=1)
 
             # Save model
-            self.model.save("model.h5")
+            self.model.save("model.keras")
             
 
 
@@ -114,18 +115,17 @@ class NN():
 
 
 def encode_states(states, result, original_rewards):
-    new_df = pd.DataFrame(columns=['state', 'reward', 'original_reward'])
-    rows = []
+    encoded = []
+    # First add all states
     for i in range(0, 22):
-        row = {
-            'state': i / JACKPOT,
-            'reward': result / JACKPOT if i in states else 0,
-            'original_reward': original_rewards[i] / JACKPOT
-        }
-        rows.append(row)
-    new_df = pd.concat([new_df, pd.DataFrame(rows)], ignore_index=True)
-    new_df = new_df[['state', 'reward', 'original_reward']].values.astype('float32')
-    return new_df
+        encoded.append(i / JACKPOT)
+    # Then add all results
+    for i in range(0, 22):
+        encoded.append(result / JACKPOT if i in states else 0)
+    # Finally add all original rewards
+    for i in range(0, 22):
+        encoded.append(original_rewards[i] / JACKPOT)
+    return np.array(encoded, dtype='float32').reshape(1, -1)
 
 
 def encode_reward(X, reward):
@@ -133,23 +133,64 @@ def encode_reward(X, reward):
 
 
 def main():
-    nn = NN()
-    # try load the model
-    try:
-        nn.model.load_weights("model.h5")
-    except:
-        print("Model not found")
-    
-    
-    nn.train(epochs=1000)
-    statistics = {}
-    epochs = 100
-    for i in range(epochs):
-        reward = nn.play()
-        statistics[i] = reward
-    print("Average reward:", sum(statistics.values()) / epochs)
-    print("Loosed games:", len([x for x in statistics.values() if x == 0]))
-
+    to_train = False
+    if to_train:
+        print("Training...")
+        nn = NN()
+        # try load the model
+        try:
+            nn.model.load_weights("model.keras")
+        except:
+            print("Model not found")
+        
+        total_episodes = 10000
+        eval_frequency = 100
+        eval_episodes = 100  # number of episodes to run during evaluation
+        best_avg_reward = float('-inf')
+        
+        for episode in range(total_episodes):
+            # Training
+            nn.train(epochs=1, epsilon=0.1)
+            
+            # Evaluation every eval_frequency episodes
+            if (episode + 1) % eval_frequency == 0:
+                print(f"\nEvaluation after episode {episode + 1}:")
+                rewards = []
+                for _ in range(eval_episodes):
+                    reward = nn.play()
+                    rewards.append(reward)
+                
+                avg_reward = sum(rewards) / len(rewards)
+                lost_games = len([r for r in rewards if r == 0])
+                win_rate = (len(rewards) - lost_games) / len(rewards) * 100
+                
+                print(f"Average reward: {avg_reward:.2f}")
+                print(f"Win rate: {win_rate:.1f}%")
+                print(f"Lost games: {lost_games}/{len(rewards)}\n")
+                
+                # Save model only if it's the best so far
+                if avg_reward > best_avg_reward:
+                    best_avg_reward = avg_reward
+                    nn.model.save("best_model.keras")
+                    print(f"New best model saved with average reward: {avg_reward:.2f}")
+    else:
+        print("Playing...")
+        nn = NN()
+        nn.model.load_weights("best_model.keras")
+        rewards = []
+        eval_episodes = 100
+        for _ in range(eval_episodes):
+            reward = nn.play()
+            rewards.append(reward)
+        
+        avg_reward = sum(rewards) / len(rewards)
+        lost_games = len([r for r in rewards if r == 0])
+        win_rate = (len(rewards) - lost_games) / len(rewards) * 100
+        
+        print(f"Average reward: {avg_reward:.2f}")
+        print(f"Win rate: {win_rate:.1f}%")
+        print(f"Lost games: {lost_games}/{len(rewards)}\n")
+      
 
 if __name__ == "__main__":
     main()

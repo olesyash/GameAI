@@ -12,34 +12,35 @@ class Game:
         if random:
             # Initialize reward array with random values from 0 to 21
             self.rewards = np.random.randint(0, 22, size=22)
-            print("Rewards:", self.rewards)
+            # print("Rewards:", self.rewards)
 
     def make_move(self, move: str):
         if move == "hit":
             # random number between 1 and 10
             new_card = randint(1, 10)
             self.sum += new_card
-            print(f"New card: {new_card}")
-            if self.random:
-                print(f"Reward: {self.rewards[new_card]}")
-                print("Your sum:", self.sum)
-            else:
-                print("Your sum:", self.sum)
-            self.check_reward(new_card)
+            # print(f"New card: {new_card}")
+            # if self.random:
+            #     print(f"Reward: {self.rewards[new_card]}")
+            #     print("Your sum:", self.sum)
+            # else:
+            #     print("Your sum:", self.sum)
+            self.check_reward()
             self.my_moves.append(new_card)
         elif move == "stay":
-            self.check_reward(self.my_moves[-1])
+            self.check_reward()
+            # print(f"Final Reward: {self.reward}")
             self.status = 0
         else:
             print("Invalid move")
 
-    def check_reward(self, new_card):
+    def check_reward(self):
         if self.sum > JACKPOT:
             self.reward = 0
             self.status = 0
         else:
             if self.random:
-                self.reward = self.rewards[new_card]
+                self.reward = self.rewards[self.sum]
             else:
                 self.reward = self.sum
         return self.reward
