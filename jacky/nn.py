@@ -69,7 +69,7 @@ class NN():
             next_sum = game.sum + card
             if next_sum <= JACKPOT:  # only consider valid future states
                 valid_futures += 1
-                immediate_reward = game.rewards[card] / JACKPOT if game.random else next_sum / JACKPOT
+                immediate_reward = game.rewards[next_sum] / JACKPOT if game.random else next_sum / JACKPOT
                 # Get future value estimation
                 future_state = encode_states([next_sum], immediate_reward, game.rewards)
                 future_value = self.model.predict(future_state, verbose=0)[0][0]
