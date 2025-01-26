@@ -50,10 +50,13 @@ class MCTS:
     def simulate(self, node):
         """Simulation phase: Play a random game until a terminal state is reached."""
         current_state = node.state.clone()  # Clone the state for simulation
+        print(f"Starting simulation with player: {current_state.current_player}")
         while not current_state.is_game_over():
             move = random.choice(current_state.legal_moves())
             current_state.make_move(move)
-        return current_state.get_reward()
+        reward = current_state.get_reward()
+        print(f"Simulation ended. Final player: {current_state.current_player}, Reward: {reward}")
+        return reward
 
     def backpropagate(self, node, state, reward):
         """Backpropagation phase: Update the node values and visits up the tree."""
@@ -94,6 +97,6 @@ class Node:
         max_value = max(self.children, key=lambda n: n.get_value(exploration_weight)).get_value(exploration_weight)
         # select nodes with the highest UCT value
         max_nodes = [n for n in self.children if n.get_value(exploration_weight) == max_value]
-        # randomly select on to expand upon
-        best = random.choice(max_nodes)
+        # choose the maximum visit count
+        best = max(max_nodes, key=lambda n: n.visits)
         return best
