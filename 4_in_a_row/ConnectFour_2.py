@@ -121,8 +121,8 @@ class Node:
         max_value = max(self.children, key=lambda n: n.get_value(exploration_weight)).get_value(exploration_weight)
         # select nodes with the highest UCT value
         max_nodes = [n for n in self.children if n.get_value(exploration_weight) == max_value]
-        # randomly select on to expand upon
-        best = random.choice(max_nodes)
+        # choose the maximum visit count
+        best = max(max_nodes, key=lambda n: n.visits)
         return best
 
 
