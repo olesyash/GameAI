@@ -2,12 +2,12 @@ import numpy as np
 
 ONGOING = -17
 BLACK_WIN = 1
-WHITE_WIN = 2
+WHITE_WIN = -1
 DRAW = 0
 
 
 class Gomoku:
-    def __init__(self, board_size=15):
+    def __init__(self, board_size=10):
         """Initialize the Gomoku game.
         
         Args:

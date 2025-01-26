@@ -126,7 +126,7 @@ class GomokuGUI:
 
             else:
                 # AI turn
-                best_node = self.mcts.search(self.game.clone(), iterations=1000)
+                best_node = self.mcts.search(self.game.clone(), iterations=400)
                 if self.game.make_move(best_node.state.last_move):
                     self.draw_board()
                 if self.game.is_game_over():
