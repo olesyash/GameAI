@@ -120,17 +120,20 @@ class GomokuGUI:
         
         if self.game.make_move((row, col)):
             self.draw_board()
+            self.master.update()  # Force GUI update
             
             if self.game.is_game_over():
                 self.show_winner_box()
-
             else:
                 # AI turn
-                best_node = self.mcts.search(self.game.clone(), iterations=1000)
-                if self.game.make_move(best_node.state.last_move):
-                    self.draw_board()
-                if self.game.is_game_over():
-                    self.show_winner_box()
+                self.ai_turn()
+
+    def ai_turn(self):
+        best_node = self.mcts.search(self.game.clone(), iterations=100)
+        if self.game.make_move(best_node.state.last_move):
+            self.draw_board()
+        if self.game.is_game_over():
+            self.show_winner_box()
 
     def reset_game(self):
         """Reset the game."""
