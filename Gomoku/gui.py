@@ -1,12 +1,15 @@
 import tkinter as tk
 from tkinter import messagebox
 from gomoku import Gomoku
+from MCTS import MCTS
+
 
 class GomokuGUI:
     def __init__(self, master):
         self.master = master
         self.master.title("Gomoku")
         self.game = Gomoku()
+        self.mcts = MCTS(exploration_weight=1.4)
         self.cell_size = 40
         self.padding = 20
         
@@ -98,6 +101,14 @@ class GomokuGUI:
             outline=outline
         )
 
+    def show_winner_box(self):
+        winner = self.game.get_winner()
+        if winner:
+            color = "Black" if winner == 1 else "White"
+            messagebox.showinfo("Game Over", f"{color} wins!")
+        else:
+            messagebox.showinfo("Game Over", "It's a draw!")
+
     def handle_click(self, event):
         """Handle mouse click event."""
         if self.game.is_game_over():
@@ -107,16 +118,19 @@ class GomokuGUI:
         col = round((event.x - self.padding) / self.cell_size)
         row = round((event.y - self.padding) / self.cell_size)
         
-        if self.game.make_move(row, col):
+        if self.game.make_move((row, col)):
             self.draw_board()
             
             if self.game.is_game_over():
-                winner = self.game.get_winner()
-                if winner:
-                    color = "Black" if winner == 1 else "White"
-                    messagebox.showinfo("Game Over", f"{color} wins!")
-                else:
-                    messagebox.showinfo("Game Over", "It's a draw!")
+                self.show_winner_box()
+
+            else:
+                # AI turn
+                best_node = self.mcts.search(self.game.clone(), iterations=1000)
+                if self.game.make_move(best_node.state.last_move):
+                    self.draw_board()
+                if self.game.is_game_over():
+                    self.show_winner_box()
 
     def reset_game(self):
         """Reset the game."""
@@ -128,10 +142,12 @@ class GomokuGUI:
         if self.game.unmake_move():
             self.draw_board()
 
+
 def main():
     root = tk.Tk()
     app = GomokuGUI(root)
     root.mainloop()
+
 
 if __name__ == "__main__":
     main()
