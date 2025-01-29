@@ -129,8 +129,12 @@ class GomokuGUI:
                 self.ai_turn()
 
     def ai_turn(self):
-        best_node = self.mcts.search(self.game.clone(), iterations=100)
+        print("Board state before AI move: ")
+        print(str(self.game.board))
+        best_node = self.mcts.search(self.game.clone(), iterations=50000)
         if self.game.make_move(best_node.state.last_move):
+            print("Board state after AI move: ")
+            print(str(self.game.board))
             self.draw_board()
         if self.game.is_game_over():
             self.show_winner_box()
