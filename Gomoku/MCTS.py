@@ -87,7 +87,7 @@ class MCTSNode:
             # we prioritize nodes that are not explored
             return 0 if exploration_weight == 0 else float('inf')
         else:
-            return self.value / self.visits + exploration_weight * math.sqrt(math.log(self.parent.visits) / self.visits)
+            return self.value / self.visits + exploration_weight * math.sqrt(math.log(self.parent.N) / self.visits)
 
     def best_child(self, exploration_weight=1.4):
         """Selects the best child node based on UCT (Upper Confidence Bound for Trees)."""
