@@ -4,7 +4,7 @@ from consts import *
 from jacky import Game
 
 
-class MCTS:
+class MC:
     def __init__(self):
         # {state : action}
         self.Q = {}
@@ -82,7 +82,7 @@ class MCTS:
         print("Average reward:", sum(statistics.values()) / epochs)
         print("Loosed games:", len([x for x in statistics.values() if x == 0]))
 
-mcts = MCTS()
+mcts = MC()
 
 mcts.train(epochs=2000, epsilon=0.1)
 

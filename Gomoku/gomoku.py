@@ -4,10 +4,12 @@ ONGOING = -17
 BLACK_WIN = 1
 WHITE_WIN = -1
 DRAW = 0
+WIN_COUNT=4
+BOARD_SIZE=7
 
 
 class Gomoku:
-    def __init__(self, board_size=10):
+    def __init__(self, board_size=BOARD_SIZE):
         """Initialize the Gomoku game.
         
         Args:
@@ -136,7 +138,7 @@ class Gomoku:
                 r -= dr
                 c -= dc
 
-            if count >= 5:
+            if count >= WIN_COUNT:
                 return True
 
         return False
