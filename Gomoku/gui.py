@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import messagebox
 from gomoku import Gomoku
-from MCTS import MCTS
+from MCTS import MCTSPlayer
 
 
 class GomokuGUI:
@@ -9,7 +9,7 @@ class GomokuGUI:
         self.master = master
         self.master.title("Gomoku")
         self.game = Gomoku()
-        self.mcts = MCTS(exploration_weight=1.4)
+        self.mcts = MCTSPlayer(exploration_weight=1.4)
         self.cell_size = 40
         self.padding = 20
         
@@ -129,7 +129,7 @@ class GomokuGUI:
                 self.ai_turn()
 
     def ai_turn(self):
-        best_node = self.mcts.search(self.game.clone(), iterations=100)
+        best_node = self.mcts.search(self.game.clone(), iterations=50000)
         if self.game.make_move(best_node.state.last_move):
             self.draw_board()
         if self.game.is_game_over():

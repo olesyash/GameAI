@@ -3,13 +3,13 @@ import random
 import math
 
 
-class MCTS:
+class MCTSPlayer:
     def __init__(self, exploration_weight=1):
         self.exploration_weight = exploration_weight
 
     def search(self, initial_state, iterations=1000):
         """Performs MCTS to find the best move."""
-        root = Node(initial_state)
+        root = MCTSNode(initial_state)
 
         for _ in range(iterations):
             # 1. Selection: Traverse the tree using UCT until reaching a leaf node.
@@ -42,7 +42,7 @@ class MCTS:
             if move not in [child.state.last_move for child in node.children]:
                 new_state = node.state.clone()
                 new_state.make_move(move)
-                child_node = Node(new_state, parent=node)
+                child_node = MCTSNode(new_state, parent=node)
                 node.children.append(child_node)
                 return child_node
         raise Exception("No moves to expand")
@@ -70,7 +70,7 @@ class MCTS:
             node = node.parent
 
 
-class Node:
+class MCTSNode:
     def __init__(self, state, parent=None):
         self.state = state  # The game state
         self.parent = parent  # Parent node

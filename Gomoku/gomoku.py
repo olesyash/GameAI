@@ -7,7 +7,7 @@ DRAW = 0
 
 
 class Gomoku:
-    def __init__(self, board_size=15):
+    def __init__(self, board_size=10):
         """Initialize the Gomoku game.
         
         Args:
