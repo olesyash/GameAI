@@ -1,6 +1,9 @@
 import numpy as np
 
 ONGOING = -17
+BLACK_WIN = 1
+WHITE_WIN = -1
+DRAW = 0
 
 
 class Gomoku:
@@ -12,9 +15,10 @@ class Gomoku:
         """
         self.board_size = board_size
         self.board = np.zeros((board_size, board_size), dtype=int)
-        self.current_player = 1  # 1 for black, 2 for white
+        self.current_player = 1  # 1 for black, -1 for white
         self.move_history = []
         self.status = ONGOING  # -17 for ongoing, will be player number (1 or 2) when won, or 0 for draw
+        self.last_move = None
         self.winner = None
 
     def reset(self):
@@ -22,10 +26,11 @@ class Gomoku:
         self.board = np.zeros((self.board_size, self.board_size), dtype=int)
         self.current_player = 1
         self.move_history.clear()
+        self.last_move = None
         self.status = ONGOING
         self.winner = None
 
-    def get_legal_moves(self):
+    def legal_moves(self):
         """Get a list of legal moves.
 
         Returns:
@@ -44,28 +49,29 @@ class Gomoku:
             bool: True if move is legal, False otherwise
         """
         # Check if position is within board bounds
-        legal_moves = self.get_legal_moves()
+        legal_moves = self.legal_moves()
         if (row, col) not in legal_moves:
             return False
         
         # Check if position is empty
         return self.board[row, col] == 0
 
-    def make_move(self, row, col):
+    def make_move(self, row_col):
         """Make a move on the board.
         
         Args:
-            row (int): Row index
-            col (int): Column index
+            row_col (tuple): Row and column indices
             
         Returns:
             bool: True if move was successful, False otherwise
         """
+        row, col = row_col
         if not self.is_legal_move(row, col) or self.status != ONGOING:
             return False
 
         self.board[row, col] = self.current_player
         self.move_history.append((row, col))
+        self.last_move = (row, col)
 
         # Check for win
         if self._check_win(row, col):
@@ -75,7 +81,7 @@ class Gomoku:
             self.status = 0  # Draw
 
         # Switch player
-        self.current_player = 3 - self.current_player  # Switches between 1 and 2
+        self.current_player = 0 - self.current_player  # Switches between 1 and -1
         return True
 
     def unmake_move(self):
@@ -84,8 +90,9 @@ class Gomoku:
             return False
 
         row, col = self.move_history.pop()
+        self.last_move = self.move_history[-1] if self.move_history else None
         self.board[row, col] = 0
-        self.current_player = 3 - self.current_player
+        self.current_player = 0 - self.current_player
         self.status = ONGOING
         self.winner = None
         return True
@@ -176,6 +183,7 @@ class Gomoku:
         clone.board = self.board.copy()
         clone.current_player = self.current_player
         clone.move_history = self.move_history.copy()
+        clone.last_move = self.last_move
         clone.status = self.status
         clone.winner = self.winner
         return clone
@@ -195,3 +203,15 @@ class Gomoku:
         self.current_player = int(game_array[-2])
         self.status = int(game_array[-1])
         self.winner = self.current_player if self.status == self.current_player else None
+
+    def get_reward(self):
+        """Returns the reward for the current game state."""
+        if self.status == BLACK_WIN:
+            return 1  # Reward for BLACK winning
+        elif self.status == WHITE_WIN:
+            return -1  # Reward for WHITE winning
+        elif self.status == DRAW:
+            return 0  # Reward for a draw
+        else:
+            # Game is ongoing; no reward yet
+            return 0
