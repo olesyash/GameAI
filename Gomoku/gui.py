@@ -2,18 +2,21 @@ import tkinter as tk
 from tkinter import messagebox
 from gomoku import Gomoku
 from MCTS import MCTSPlayer
-
+from puct import PUCTPlayer,PUCTNode
 
 class GomokuGUI:
     def __init__(self, master):
         self.master = master
         self.master.title("Gomoku")
         self.game = Gomoku()
-        self.mcts = MCTSPlayer(exploration_weight=1.4)
+        #self.PUCTNode = PUCTNode(state=self.game)
+        self.PUCTPlayer=PUCTPlayer(exploration_weight=1.4,game=self.game)
+
+        #self.mcts = MCTSPlayer(exploration_weight=1.4)
         self.cell_size = 40
         self.padding = 20
         self.ai_thinking = False
-        
+
         # Calculate canvas size based on board size and padding
         canvas_size = self.game.board_size * self.cell_size + 2 * self.padding
         
@@ -115,7 +118,7 @@ class GomokuGUI:
         # Block all clicks during AI turn
         if self.ai_thinking or self.game.current_player != 1:
             return
-            
+
         # Block if game is over
         if self.game.is_game_over():
             return
@@ -127,28 +130,35 @@ class GomokuGUI:
         # Validate move is within board boundaries
         if not (0 <= row < self.game.board_size and 0 <= col < self.game.board_size):
             return
-            
+
         # Try to make the move
         if not self.game.make_move((row, col)):
             return
-            
+
         # Move was successful, update display
         self.draw_board()
         self.master.update()
-        
+
         if self.game.is_game_over():
             self.show_winner_box()
             return
-            
+
         # Set thinking flag and show loader
         self.ai_thinking = True
         self.canvas.config(cursor="watch")
         self.master.update()
-        
+
         # Make AI move
         self.execute_ai_move()
 
     def ai_turn(self):
+        #best_node = self.mcts.search(self.game.clone(), iterations=1000)
+
+        best_node = self.PUCTPlayer.best_move(self.game, iterations=1000)
+        if self.game.make_move(best_node.state.last_move):
+            self.draw_board()
+        if self.game.is_game_over():
+            self.show_winner_box()
         """Handle AI's turn."""
         self.execute_ai_move()
 
@@ -156,12 +166,12 @@ class GomokuGUI:
         """Execute the AI move and update the display."""
         try:
             # Perform AI move
-            best_node = self.mcts.search(self.game.clone(), iterations=5000)
+            best_node = self.PUCTPlayer.best_move(self.game, iterations=1000)
             if best_node and best_node.state.last_move:
                 self.game.make_move(best_node.state.last_move)
                 self.draw_board()
                 self.master.update()
-                
+
                 if self.game.is_game_over():
                     self.show_winner_box()
         finally:

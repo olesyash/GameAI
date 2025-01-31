@@ -41,6 +41,7 @@ class PUCTPlayer:
         # Set device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
+        self.model.load_model('models/best_gomoku_model.pt')
 
     def select(self, node):
         """Selection phase: Navigate the tree using PUCT."""
@@ -138,7 +139,7 @@ class PUCTPlayer:
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         best_loss = float('inf')
         no_improvement_count = 0
-        patience = 10  # Number of episodes to wait before early stopping
+        patience = 200  # Number of episodes to wait before early stopping
         
         print(f"Starting training for {num_episodes} episodes...")
         print(f"Batch size: {batch_size}, Learning rate: {learning_rate}")

@@ -13,7 +13,7 @@ class MCTSPlayer:
 
         for _ in range(iterations):
             # 1. Selection: Traverse the tree using UCT until reaching a leaf node.
-            node, state = self.select(root)
+            node = self.select(root)
 
             # 2. Expansion: Add a new child node by exploring an unvisited move.
             if not node.state.is_game_over():
@@ -23,17 +23,16 @@ class MCTSPlayer:
             reward = self.simulate(node)
 
             # 4. Backpropagation: Update the value and visit counts up the tree.
-            self.backpropagate(node, state, reward)
+            self.backpropagate(node, reward)
 
         # Return the best child node (without exploration weight).
         return root.best_child(exploration_weight=0)
 
     def select(self, node):
         """Selection phase: Navigate the tree using UCT."""
-        state = deepcopy(node.state)
         while not node.state.is_game_over() and node.is_fully_expanded():
             node = node.best_child(self.exploration_weight)
-        return node, state
+        return node
 
     def expand(self, node):
         """Expansion phase: Add a new child node for an unvisited move."""
@@ -55,18 +54,12 @@ class MCTSPlayer:
             current_state.make_move(move)
         return current_state.get_reward()
 
-    def backpropagate(self, node, state, reward):
+    def backpropagate(self, node, reward):
         """Backpropagation phase: Update the node values and visits up the tree."""
-        if reward == state.current_player:
-            reward = -1
-        elif reward == 0:
-            reward = 0
-        else:
-            reward = 1
         while node is not None:
             node.visits += 1
             node.value += reward
-            reward = -reward
+            reward = 1 -reward
             node = node.parent
 
 

@@ -235,13 +235,11 @@ class Gomoku:
         self.winner = self.current_player if self.status == self.current_player else None
 
     def get_reward(self):
-        """Returns the reward for the current game state."""
-        if self.status == BLACK_WIN:
-            return 1  # Reward for BLACK winning
-        elif self.status == WHITE_WIN:
-            return -1  # Reward for WHITE winning
-        elif self.status == DRAW:
-            return 0  # Reward for a draw
+        """Returns the reward for the current game state relative to player"""
+        if self.status == self.current_player:
+            return 1
+        elif self.status == 0:
+            return 0.5
         else:
             # Game is ongoing; no reward yet
             return 0
