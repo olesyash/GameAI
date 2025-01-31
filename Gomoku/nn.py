@@ -63,6 +63,12 @@ class GameNetwork(nn.Module):
         # Dropout for regularization
         self.dropout = nn.Dropout(0.3)
 
+        # Initialize weights
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_normal_(m.weight)
+                nn.init.constant_(m.bias, 0)
+
     def forward(self, x):
         # Flatten the input
         x = x.view(-1, self.board_size * self.board_size)
@@ -88,65 +94,76 @@ class GameNetwork(nn.Module):
 
         return policy, value
 
-
-    def train_step(self, target_policy, target_value, optimizer):
-        """Train the neural network using MCTS visit counts and game outcome
+    def predict(self, state):
+        """Get policy and value predictions for a game state
         
         Args:
-            target_policy: Actual move probabilities
-            target_value: Actual game outcome (+1, 0, -1) or bootstrapped value
-            optimizer: PyTorch optimizer
-        
+            state: Current game state
+            
         Returns:
-            tuple: (total_loss, policy_loss, value_loss)
+            tuple: (policy, value)
+                - policy: numpy array of move probabilities
+                - value: float value prediction (-1 to 1)
         """
-        target_policy = torch.FloatTensor(target_policy)
-        target_value = torch.FloatTensor([target_value])
-
-        # Forward pass
-        optimizer.zero_grad()
+        # Prepare state for neural network
         board_tensor = torch.FloatTensor(state.board).view(1, 1, self.board_size, self.board_size)
-        policy, value = self.model(board_tensor)
         
-        # Calculate losses
-        policy_loss = -torch.sum(target_policy * torch.log(policy.view(-1) + 1e-8))  # Cross entropy
-        value_loss = F.mse_loss(value, target_value)  # MSE loss
-        total_loss = policy_loss + self.value_weight * value_loss
-        
-        # Backward pass
-        total_loss.backward()
-        optimizer.step()
-        
-        return total_loss.item(), policy_loss.item(), value_loss.item()
+        # Get policy and value predictions
+        with torch.no_grad():
+            policy, value = self.forward(board_tensor)
+            policy = policy.view(-1).numpy()
+            value = value.item()
 
-    def train(self,board_size, states, targets):
-        optimizer = torch.optim.Adam(self.parameters())
-        criterion_value = nn.MSELoss()
-        criterion_policy = nn.NLLLoss()
-        for epoch in range(100):
-            for state, target in zip(states, targets):
-                state = torch.tensor(state).float().unsqueeze(0)
-                target = torch.tensor(target).float().unsqueeze(0)
-                value, policy = self(state)
-                loss_value = criterion_value(value, target[0])
-                loss_policy = criterion_policy(policy, target[1])
-                loss = loss_value + loss_policy
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-    
-    def predict(self, state):
+        return policy, value  # Return in order expected by PUCT
 
-        self
-        return V, P
-        
-
-    def save_model(self):
+    def save_model(self, path='models/gomoku_model.pt'):
         """
-        Save model 
-        :return:
+        Save model state to file
+        
+        Args:
+            path: Path to save the model to
         """
-        pass
+        # Create models directory if it doesn't exist
+        import os
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        
+        # Save model state
+        state = {
+            'board_size': self.board_size,
+            'state_dict': self.state_dict(),
+            'model_version': '1.0'  # Useful for future compatibility
+        }
+        torch.save(state, path)
+        print(f"Model saved to {path}")
 
-    def load_model(self):
-        pass
+    def load_model(self, path='models/gomoku_model.pt'):
+        """
+        Load model state from file
+        
+        Args:
+            path: Path to load the model from
+            
+        Returns:
+            bool: True if model was loaded successfully, False otherwise
+        """
+        try:
+            # Load model state
+            state = torch.load(path)
+            
+            # Verify board size matches
+            if state['board_size'] != self.board_size:
+                print(f"Warning: Saved model board size ({state['board_size']}) "
+                      f"doesn't match current board size ({self.board_size})")
+                return False
+            
+            # Load state dict
+            self.load_state_dict(state['state_dict'])
+            print(f"Model loaded from {path}")
+            return True
+            
+        except FileNotFoundError:
+            print(f"No saved model found at {path}")
+            return False
+        except Exception as e:
+            print(f"Error loading model: {str(e)}")
+            return False

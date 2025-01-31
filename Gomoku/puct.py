@@ -1,6 +1,8 @@
 from copy import deepcopy
 from nn import GameNetwork
-
+import torch
+import torch.nn.functional as F
+from gomoku import Gomoku, BOARD_SIZE, BOARD_TENSOR, POLICY_PROBS, STATUS
 
 class PUCTNode:
     def __init__(self,state, parent=None, q=0, p=0):
@@ -10,7 +12,6 @@ class PUCTNode:
         self.children = []
         self.parent = parent
         self.state = state
-        self.value_weight = value_weight  # λ in loss function
 
     def get_puct(self, exploration_weight):
         """Get the PUCT value of the node."""
@@ -32,8 +33,10 @@ class PUCTNode:
         return len(self.children) == len(self.state.legal_moves())
 
 class PUCTPlayer:
-    def __init__(self, exploration_weight):
+    def __init__(self, exploration_weight, game):
         self.exploration_weight = exploration_weight
+        self.model = GameNetwork(board_size=game.board_size)
+        self.value_weight = 0.5  # λ in loss function
 
     def select(self, node):
         """Selection phase: Navigate the tree using PUCT."""
@@ -42,7 +45,7 @@ class PUCTPlayer:
             node = node.best_child(self.exploration_weight)
         return node, state
     
-    def expand(self,node, policy):
+    def expand(self, node, policy):
         """Expansion phase: Add a new child node for an unvisited move."""
         possible_moves = node.state.legal_moves()
 
@@ -50,10 +53,9 @@ class PUCTPlayer:
             if move not in [child.state.last_move for child in node.children]:
                 child_position = node.state.clone()
                 child_position.make_move(move)
-                # move is (row, col) so we need to convert it to a single index
-                move_index = move[0] * node.state.size + move[1]
-                # policy is a vector of probabilities for each move,
-                # so we need to get the probability for the current move
+                # Convert (row, col) to index in the policy vector
+                move_index = move[0] * node.state.board_size + move[1]
+                # Get probability for this move from policy vector
                 child_node = PUCTNode(child_position, parent=node, P=policy[move_index])
                 node.children.append(child_node)
                 return child_node
@@ -69,17 +71,17 @@ class PUCTPlayer:
 
     def choose_best_move(self, root_node):
         best_child = max(root_node.children, key=lambda child: child.N)
-        return best_child.move
+        return best_child.state.last_move
 
     def best_move(self,initial_state, iterations):
         root = PUCTNode(initial_state)
-        gm = GameNetwork()
+        
         for _ in range(iterations):
             # 1. Selection: Traverse the tree using UCT until reaching a leaf node.
             node, state = self.select(root)
             # 2. Expansion: Add a new child node by exploring an unvisited move.
             if not node.state.is_game_over():
-                policy, value = gm.predict(node.state)
+                policy, value = self.model.predict(node.state)  
                 if node.Q == 0:
                     node.Q = value
                 node = self.expand(node, policy)
@@ -89,3 +91,107 @@ class PUCTPlayer:
         return self.choose_best_move(root)
 
 
+    def train_step(self, game, optimizer):
+        """Train the neural network using MCTS visit counts and game outcome
+        
+        Args:
+            game: Current game state
+            optimizer: PyTorch optimizer
+        
+        Returns:
+            tuple: (total_loss, policy_loss, value_loss)
+        """
+        encoded_game = game.encode()
+        board_tensor = encoded_game[BOARD_TENSOR]
+        target_policy = encoded_game[POLICY_PROBS]
+        target_value = encoded_game[STATUS]
+
+        # Forward pass
+        optimizer.zero_grad()
+        policy, value = self.model(board_tensor)
+        
+        # Calculate losses
+        policy_loss = -torch.sum(target_policy * torch.log(policy.view(-1) + 1e-8))  # Cross entropy
+        value_loss = F.mse_loss(value, target_value)  # MSE loss
+
+        # L = Policy Loss + λ · Value Loss,
+        total_loss = policy_loss + self.value_weight * value_loss
+        
+        # Backward pass
+        total_loss.backward()
+        optimizer.step()
+        
+        return total_loss.item(), policy_loss.item(), value_loss.item()
+
+    def train(self, num_episodes=1000, batch_size=32, learning_rate=0.001):
+        """Train the model through self-play
+        
+        Args:
+            num_episodes: Number of games to play
+            batch_size: Number of game states to train on at once
+            learning_rate: Learning rate for optimizer
+        """
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
+        
+        for episode in range(num_episodes):
+            # Initialize new game
+            game = Gomoku(board_size=BOARD_SIZE)
+            game_states = []
+            total_loss = 0
+            
+            # Play game until terminal state
+            while not game.is_game_over():
+                # Store current game state
+                game_states.append(game.clone())
+                
+                # Get move from MCTS
+                move = self.best_move(game, 100)
+                game.make_move(move)
+                
+                # Train on a batch of states if we have enough
+                if len(game_states) >= batch_size:
+                    batch_loss = 0
+                    for state in game_states[-batch_size:]:
+                        loss, _, _ = self.train_step(state, optimizer)
+                        batch_loss += loss
+                    total_loss += batch_loss / batch_size
+                    
+            # Train on remaining states at end of game
+            if game_states:
+                remaining = len(game_states) % batch_size
+                if remaining > 0:
+                    batch_loss = 0
+                    for state in game_states[-remaining:]:
+                        loss, _, _ = self.train_step(state, optimizer)
+                        batch_loss += loss
+                    total_loss += batch_loss / remaining
+            
+            # Log progress
+            avg_loss = total_loss / (len(game_states) / batch_size)
+            if episode % 10 == 0:
+                print(f"Episode {episode}, Average Loss: {avg_loss:.4f}")
+            
+            # Save model periodically
+            if episode % 100 == 0:
+                self.model.save_model()
+
+    def play_game(self, opponent=None):
+        """Play a single game against an opponent or self
+        
+        Args:
+            opponent: Optional opponent player (if None, plays against self)
+            
+        Returns:
+            game: The completed game
+            winner: The winning player (1 or -1) or 0 for draw
+        """
+        game = Gomoku(board_size=BOARD_SIZE)
+        
+        while not game.is_game_over():
+            if game.current_player == 1 or opponent is None:
+                move = self.best_move(game, 100)
+            else:
+                move = opponent.best_move(game, 100)
+            game.make_move(move)
+        
+        return game, game.get_winner()

@@ -1,3 +1,4 @@
+from base64 import encode
 import numpy as np
 
 ONGOING = -17
@@ -6,6 +7,11 @@ WHITE_WIN = -1
 DRAW = 0
 WIN_COUNT=4
 BOARD_SIZE=7
+BOARD_TESNSOR = "board_tensor"
+POLICY_PROBS = "policy_probs"
+STATUS = "status"
+CURRENT_PLAYER = "current_player"
+
 
 
 class Gomoku:
@@ -191,13 +197,33 @@ class Gomoku:
         return clone
 
     def encode(self):
-        """ Encode the Game to vector"""
-        game_array = np.array(self.board).flatten()
-        # Add current player
-        game_array = np.append(game_array, self.current_player)
-        # Add status
-        game_array = np.append(game_array, self.status)
-        return game_array
+        """Encode the game state into policy probabilities and other features.
+        
+        Returns:
+            tuple: (policy_probs, game_state)
+                - policy_probs: Probability distribution over all possible moves
+                - game_state: Encoded game state including board and game info
+        """
+
+        board_tensor = torch.FloatTensor(self.board).view(1, 1, self.board_size, self.board_size)
+
+        # Create policy probabilities
+        legal_moves = self.legal_moves()
+        policy_probs = np.zeros(self.board_size * self.board_size)
+        
+        if legal_moves:  # If there are legal moves
+            # Give equal probability to all legal moves
+            prob_per_move = 1.0 / len(legal_moves)
+            for move in legal_moves:
+                move_idx = move[0] * self.board_size + move[1]
+                policy_probs[move_idx] = prob_per_move
+        
+        encoded_game[BOARD_TENSOR] = board_tensor
+        encoded_game[CURRENT_PLAYER] = self.current_player
+        encoded_game[STATUS] = self.status
+        encoded_game[POLICY_PROBS] = policy_probs
+
+        return encoded_game
 
     def decode(self, game_array):
         """ Decode the Game from vector"""
