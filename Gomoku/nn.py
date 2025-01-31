@@ -90,9 +90,10 @@ class GameNetwork(nn.Module):
         # Value head
         value = F.relu(self.value_fc1(x))
         value = self.dropout(value)
-        value = torch.tanh(self.value_out(value))
+        value = self.value_out(value)
+        value = torch.tanh(value)  # Ensure value is between -1 and 1
 
-        return policy, value
+        return policy, value.view(-1, 1)  # Ensure value has shape [batch_size, 1]
 
     def predict(self, state):
         """Get policy and value predictions for a game state

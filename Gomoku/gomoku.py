@@ -1,5 +1,6 @@
 from base64 import encode
 import numpy as np
+import torch
 
 ONGOING = -17
 BLACK_WIN = 1
@@ -7,7 +8,7 @@ WHITE_WIN = -1
 DRAW = 0
 WIN_COUNT=4
 BOARD_SIZE=7
-BOARD_TESNSOR = "board_tensor"
+BOARD_TENSOR = "board_tensor"
 POLICY_PROBS = "policy_probs"
 STATUS = "status"
 CURRENT_PLAYER = "current_player"
@@ -200,29 +201,30 @@ class Gomoku:
         """Encode the game state into policy probabilities and other features.
         
         Returns:
-            tuple: (policy_probs, game_state)
-                - policy_probs: Probability distribution over all possible moves
-                - game_state: Encoded game state including board and game info
+            dict: Contains board tensor, policy probabilities, and game state
         """
-
+        # Convert board to tensor format
         board_tensor = torch.FloatTensor(self.board).view(1, 1, self.board_size, self.board_size)
-
-        # Create policy probabilities
-        legal_moves = self.legal_moves()
-        policy_probs = np.zeros(self.board_size * self.board_size)
         
-        if legal_moves:  # If there are legal moves
-            # Give equal probability to all legal moves
+        # Create policy probabilities (uniform over legal moves)
+        policy_probs = np.zeros(self.board_size * self.board_size)
+        legal_moves = self.legal_moves()
+        if legal_moves:
             prob_per_move = 1.0 / len(legal_moves)
             for move in legal_moves:
                 move_idx = move[0] * self.board_size + move[1]
                 policy_probs[move_idx] = prob_per_move
         
+        # Convert to tensors with correct shapes
+        policy_probs = torch.FloatTensor(policy_probs)
+        status_tensor = torch.FloatTensor([[self.status]])  # Shape: [1, 1]
+        
+        encoded_game = {}
         encoded_game[BOARD_TENSOR] = board_tensor
         encoded_game[CURRENT_PLAYER] = self.current_player
-        encoded_game[STATUS] = self.status
+        encoded_game[STATUS] = status_tensor
         encoded_game[POLICY_PROBS] = policy_probs
-
+        
         return encoded_game
 
     def decode(self, game_array):

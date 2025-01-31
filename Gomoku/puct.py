@@ -56,7 +56,7 @@ class PUCTPlayer:
                 # Convert (row, col) to index in the policy vector
                 move_index = move[0] * node.state.board_size + move[1]
                 # Get probability for this move from policy vector
-                child_node = PUCTNode(child_position, parent=node, P=policy[move_index])
+                child_node = PUCTNode(child_position, parent=node, p=policy[move_index])
                 node.children.append(child_node)
                 return child_node
         raise Exception("No moves to expand")
@@ -105,7 +105,7 @@ class PUCTPlayer:
         board_tensor = encoded_game[BOARD_TENSOR]
         target_policy = encoded_game[POLICY_PROBS]
         target_value = encoded_game[STATUS]
-
+        
         # Forward pass
         optimizer.zero_grad()
         policy, value = self.model(board_tensor)
@@ -113,7 +113,7 @@ class PUCTPlayer:
         # Calculate losses
         policy_loss = -torch.sum(target_policy * torch.log(policy.view(-1) + 1e-8))  # Cross entropy
         value_loss = F.mse_loss(value, target_value)  # MSE loss
-
+        
         # L = Policy Loss + λ · Value Loss,
         total_loss = policy_loss + self.value_weight * value_loss
         
