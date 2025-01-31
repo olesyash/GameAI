@@ -12,6 +12,7 @@ class GomokuGUI:
         self.mcts = MCTSPlayer(exploration_weight=1.4)
         self.cell_size = 40
         self.padding = 20
+        self.ai_thinking = False
         
         # Calculate canvas size based on board size and padding
         canvas_size = self.game.board_size * self.cell_size + 2 * self.padding
@@ -111,6 +112,11 @@ class GomokuGUI:
 
     def handle_click(self, event):
         """Handle mouse click event."""
+        # Block all clicks during AI turn
+        if self.ai_thinking or self.game.current_player != 1:
+            return
+            
+        # Block if game is over
         if self.game.is_game_over():
             return
             
@@ -118,27 +124,59 @@ class GomokuGUI:
         col = round((event.x - self.padding) / self.cell_size)
         row = round((event.y - self.padding) / self.cell_size)
         
-        if self.game.make_move((row, col)):
-            self.draw_board()
-            self.master.update()  # Force GUI update
+        # Validate move is within board boundaries
+        if not (0 <= row < self.game.board_size and 0 <= col < self.game.board_size):
+            return
             
-            if self.game.is_game_over():
-                self.show_winner_box()
-            else:
-                # AI turn
-                self.ai_turn()
-
-    def ai_turn(self):
-        best_node = self.mcts.search(self.game.clone(), iterations=1000)
-        if self.game.make_move(best_node.state.last_move):
-            self.draw_board()
+        # Try to make the move
+        if not self.game.make_move((row, col)):
+            return
+            
+        # Move was successful, update display
+        self.draw_board()
+        self.master.update()
+        
         if self.game.is_game_over():
             self.show_winner_box()
+            return
+            
+        # Set thinking flag and show loader
+        self.ai_thinking = True
+        self.canvas.config(cursor="watch")
+        self.master.update()
+        
+        # Make AI move
+        self.execute_ai_move()
+
+    def ai_turn(self):
+        """Handle AI's turn."""
+        self.execute_ai_move()
+
+    def execute_ai_move(self):
+        """Execute the AI move and update the display."""
+        try:
+            # Perform AI move
+            best_node = self.mcts.search(self.game.clone(), iterations=5000)
+            if best_node and best_node.state.last_move:
+                self.game.make_move(best_node.state.last_move)
+                self.draw_board()
+                self.master.update()
+                
+                if self.game.is_game_over():
+                    self.show_winner_box()
+        finally:
+            # Reset thinking flag and loader
+            self.ai_thinking = False
+            self.canvas.config(cursor="")
+            self.master.update()
 
     def reset_game(self):
         """Reset the game."""
+        self.ai_thinking = False
+        self.canvas.config(cursor="")
         self.game.reset()
         self.draw_board()
+        self.master.update()
 
     def undo_move(self):
         """Undo the last move."""
