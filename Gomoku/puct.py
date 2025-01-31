@@ -138,7 +138,7 @@ class PUCTPlayer:
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         best_loss = float('inf')
         no_improvement_count = 0
-        patience = 10  # Number of episodes to wait before early stopping
+        patience = 200  # Number of episodes to wait before early stopping
         
         print(f"Starting training for {num_episodes} episodes...")
         print(f"Batch size: {batch_size}, Learning rate: {learning_rate}")
