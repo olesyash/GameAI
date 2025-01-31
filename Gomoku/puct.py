@@ -41,6 +41,7 @@ class PUCTPlayer:
         # Set device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
+        self.model.load_model('models/best_gomoku_model.pt')
 
     def select(self, node):
         """Selection phase: Navigate the tree using PUCT."""
