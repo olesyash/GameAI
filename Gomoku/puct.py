@@ -10,6 +10,7 @@ class PUCTNode:
         self.children = []
         self.parent = parent
         self.state = state
+        self.value_weight = value_weight  # λ in loss function
 
     def get_puct(self, exploration_weight):
         """Get the PUCT value of the node."""

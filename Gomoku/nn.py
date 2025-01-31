@@ -88,6 +88,37 @@ class GameNetwork(nn.Module):
 
         return policy, value
 
+
+    def train_step(self, target_policy, target_value, optimizer):
+        """Train the neural network using MCTS visit counts and game outcome
+        
+        Args:
+            target_policy: Actual move probabilities
+            target_value: Actual game outcome (+1, 0, -1) or bootstrapped value
+            optimizer: PyTorch optimizer
+        
+        Returns:
+            tuple: (total_loss, policy_loss, value_loss)
+        """
+        target_policy = torch.FloatTensor(target_policy)
+        target_value = torch.FloatTensor([target_value])
+
+        # Forward pass
+        optimizer.zero_grad()
+        board_tensor = torch.FloatTensor(state.board).view(1, 1, self.board_size, self.board_size)
+        policy, value = self.model(board_tensor)
+        
+        # Calculate losses
+        policy_loss = -torch.sum(target_policy * torch.log(policy.view(-1) + 1e-8))  # Cross entropy
+        value_loss = F.mse_loss(value, target_value)  # MSE loss
+        total_loss = policy_loss + self.value_weight * value_loss
+        
+        # Backward pass
+        total_loss.backward()
+        optimizer.step()
+        
+        return total_loss.item(), policy_loss.item(), value_loss.item()
+
     def train(self,board_size, states, targets):
         optimizer = torch.optim.Adam(self.parameters())
         criterion_value = nn.MSELoss()
@@ -111,6 +142,10 @@ class GameNetwork(nn.Module):
         
 
     def save_model(self):
+        """
+        Save model 
+        :return:
+        """
         pass
 
     def load_model(self):
