@@ -24,8 +24,8 @@ def play_game(player1, player2=None):
     """Play a game between two players or against self"""
     game, winner = player1.play_game(opponent=player2)
     print(f"Game finished! Winner: {'Black' if winner == 1 else 'White' if winner == -1 else 'Draw'}")
-    print("Final board state:")
-    print_board(game.board)
+    # print("Final board state:")
+    # print_board(game.board)
 
 def print_board(board):
     """Print the game board in a readable format"""

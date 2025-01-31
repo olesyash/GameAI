@@ -3,6 +3,7 @@ from nn import GameNetwork
 import torch
 import torch.nn.functional as F
 from gomoku import Gomoku, BOARD_SIZE, BOARD_TENSOR, POLICY_PROBS, STATUS
+import time
 
 class PUCTNode:
     def __init__(self,state, parent=None, q=0, p=0):
@@ -37,6 +38,9 @@ class PUCTPlayer:
         self.exploration_weight = exploration_weight
         self.model = GameNetwork(board_size=game.board_size)
         self.value_weight = 0.5  # λ in loss function
+        # Set device
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(self.device)
 
     def select(self, node):
         """Selection phase: Navigate the tree using PUCT."""
@@ -102,9 +106,9 @@ class PUCTPlayer:
             tuple: (total_loss, policy_loss, value_loss)
         """
         encoded_game = game.encode()
-        board_tensor = encoded_game[BOARD_TENSOR]
-        target_policy = encoded_game[POLICY_PROBS]
-        target_value = encoded_game[STATUS]
+        board_tensor = encoded_game[BOARD_TENSOR].to(self.device)
+        target_policy = encoded_game[POLICY_PROBS].to(self.device)
+        target_value = encoded_game[STATUS].to(self.device)
         
         # Forward pass
         optimizer.zero_grad()
@@ -138,8 +142,10 @@ class PUCTPlayer:
         
         print(f"Starting training for {num_episodes} episodes...")
         print(f"Batch size: {batch_size}, Learning rate: {learning_rate}")
+        print(f"Using device: {self.device}")
         
         for episode in range(num_episodes):
+            epoch_start_time = time.time()
             # Initialize new game
             game = Gomoku(board_size=BOARD_SIZE)
             game_states = []
@@ -192,6 +198,10 @@ class PUCTPlayer:
                 no_improvement_count = 0
             else:
                 no_improvement_count += 1
+
+            epoch_end_time = time.time()
+            epoch_duration = epoch_end_time - epoch_start_time
+            print(f"Episode {episode + 1}/{num_episodes}, Loss: {total_loss:.4f}, Time: {epoch_duration:.2f}s")
             
             # Regular checkpoint save
             if episode % 100 == 0:

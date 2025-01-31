@@ -73,6 +73,9 @@ class GameNetwork(nn.Module):
         # Flatten the input
         x = x.view(-1, self.board_size * self.board_size)
 
+        # Ensure input tensor is on the same device as the model
+        x = x.to(next(self.parameters()).device)
+
         # Shared layers
         x = F.relu(self.fc1(x))
         x = self.dropout(x)
@@ -108,12 +111,14 @@ class GameNetwork(nn.Module):
         """
         # Prepare state for neural network
         board_tensor = torch.FloatTensor(state.board).view(1, 1, self.board_size, self.board_size)
+        board_tensor = board_tensor.to(next(self.parameters()).device)
         
         # Get policy and value predictions
         with torch.no_grad():
             policy, value = self.forward(board_tensor)
-            policy = policy.view(-1).numpy()
-            value = value.item()
+            # Move tensors to CPU before converting to numpy
+            policy = policy.cpu().view(-1).numpy()
+            value = value.cpu().item()
 
         return policy, value  # Return in order expected by PUCT
 
