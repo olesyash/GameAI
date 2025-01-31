@@ -132,12 +132,19 @@ class PUCTPlayer:
             learning_rate: Learning rate for optimizer
         """
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
+        best_loss = float('inf')
+        no_improvement_count = 0
+        patience = 10  # Number of episodes to wait before early stopping
+        
+        print(f"Starting training for {num_episodes} episodes...")
+        print(f"Batch size: {batch_size}, Learning rate: {learning_rate}")
         
         for episode in range(num_episodes):
             # Initialize new game
             game = Gomoku(board_size=BOARD_SIZE)
             game_states = []
             total_loss = 0
+            num_batches = 0
             
             # Play game until terminal state
             while not game.is_game_over():
@@ -154,8 +161,10 @@ class PUCTPlayer:
                     for state in game_states[-batch_size:]:
                         loss, _, _ = self.train_step(state, optimizer)
                         batch_loss += loss
-                    total_loss += batch_loss / batch_size
-                    
+                    avg_batch_loss = batch_loss / batch_size
+                    total_loss += avg_batch_loss
+                    num_batches += 1
+            
             # Train on remaining states at end of game
             if game_states:
                 remaining = len(game_states) % batch_size
@@ -164,16 +173,40 @@ class PUCTPlayer:
                     for state in game_states[-remaining:]:
                         loss, _, _ = self.train_step(state, optimizer)
                         batch_loss += loss
-                    total_loss += batch_loss / remaining
+                    avg_batch_loss = batch_loss / remaining
+                    total_loss += avg_batch_loss
+                    num_batches += 1
+            
+            # Calculate average loss for this episode
+            avg_episode_loss = total_loss / num_batches if num_batches > 0 else float('inf')
             
             # Log progress
-            avg_loss = total_loss / (len(game_states) / batch_size)
             if episode % 10 == 0:
-                print(f"Episode {episode}, Average Loss: {avg_loss:.4f}")
+                print(f"Episode {episode}, Average Loss: {avg_episode_loss:.4f}")
             
-            # Save model periodically
+            # Save best model if we have a new best loss
+            if avg_episode_loss < best_loss:
+                best_loss = avg_episode_loss
+                self.model.save_model('models/best_gomoku_model.pt')
+                print(f"Episode {episode}: New best model saved with loss {best_loss:.4f}")
+                no_improvement_count = 0
+            else:
+                no_improvement_count += 1
+            
+            # Regular checkpoint save
             if episode % 100 == 0:
-                self.model.save_model()
+                self.model.save_model(f'models/gomoku_model_checkpoint_{episode}.pt')
+            
+            # Early stopping
+            if no_improvement_count >= patience:
+                print(f"No improvement for {patience} episodes. Early stopping...")
+                break
+        
+        print("Training completed!")
+        print(f"Best model saved with loss: {best_loss:.4f}")
+        
+        # Load the best model for future use
+        self.model.load_model('models/best_gomoku_model.pt')
 
     def play_game(self, opponent=None):
         """Play a single game against an opponent or self
