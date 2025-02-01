@@ -49,23 +49,40 @@ class MCTSPlayer:
         return root.best_child(exploration_weight=0)
 
     def select(self, node):
-        """Selection phase: Navigate the tree using UCT."""
-        while not node.state.is_game_over() and node.is_fully_expanded():
-            node = node.best_child(self.exploration_weight)
-        return node
+        """Selection phase: Navigate the tree using UCT until reaching a leaf node."""
+        current = node
+        while not current.state.is_game_over():
+            if not current.children:  # If node has no children yet
+                return current
+            if not current.is_fully_expanded():
+                return current
+            current = current.best_child(self.exploration_weight)
+        return current
 
     def expand(self, node):
-        """Expansion phase: Add a new child node for an unvisited move."""
-        possible_moves = node.state.legal_moves()
-        for move in possible_moves:
-            if move not in [child.state.last_move for child in node.children]:
-                new_state = node.state.clone()
-                new_state.make_move(move)
-                child_node = self.get_or_create_node(new_state, parent=node)
-                node.children.append(child_node)
-                return child_node
-        raise Exception("No moves to expand")
+        """Expansion phase: Add a new child node by exploring an unvisited move."""
+        if node.state.is_game_over():
+            return node
 
+        possible_moves = node.state.legal_moves()
+        if not possible_moves:  # No legal moves available
+            return node
+            
+        # Get moves not yet expanded
+        expanded_moves = {child.state.last_move for child in node.children}
+        unexpanded_moves = [move for move in possible_moves if move not in expanded_moves]
+        
+        if not unexpanded_moves:  # All moves are expanded
+            return node.best_child(self.exploration_weight)
+            
+        # Choose a random unexpanded move
+        move = random.choice(unexpanded_moves)
+        new_state = node.state.clone()
+        new_state.make_move(move)
+        
+        child_node = self.get_or_create_node(new_state, parent=node)
+        node.children.append(child_node)
+        return child_node
 
     def simulate(self, node):
         """Simulation phase: Play a random game until a terminal state is reached."""
@@ -76,29 +93,26 @@ class MCTSPlayer:
             moves = current_state.legal_moves()
             winning_move = None
             
+            # First try to find winning moves
             for move in moves:
                 test_state = current_state.clone()
                 test_state.make_move(move)
                 if test_state.status != ONGOING:
-                    winning_move = move
+                    current_state = test_state
                     break
             
-            # Make winning move if found, otherwise random
-            if winning_move:
-                current_state.make_move(winning_move)
-            else:
-                # Weight center moves more heavily
+            # If no winning moves found, make a weighted random move
+            if current_state.status == ONGOING:
                 center_x, center_y = current_state.board_size // 2, current_state.board_size // 2
                 weighted_moves = []
                 for move in moves:
-                    # Distance from center
                     dist = abs(move[0] - center_x) + abs(move[1] - center_y)
-                    weight = 1.0 / (dist + 1)  # Avoid division by zero
-                    weighted_moves.extend([move] * int(weight * 10))
+                    weight = max(1, 5 - dist)  # Higher weight for center moves
+                    weighted_moves.extend([move] * weight)
                 
-                move = random.choice(weighted_moves if weighted_moves else moves)
+                move = random.choice(weighted_moves)
                 current_state.make_move(move)
-        
+
         # Relative to current player !!!
         return node.get_reward(current_state)
 
@@ -152,6 +166,8 @@ class MCTSNode:
 
     def is_fully_expanded(self):
         """Checks if all possible moves have been expanded."""
+        if not self.state.legal_moves():
+            return True
         return len(self.children) == len(self.state.legal_moves())
         
     def best_child(self, exploration_weight=2):
