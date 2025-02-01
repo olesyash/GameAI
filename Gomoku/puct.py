@@ -234,7 +234,7 @@ class PUCTPlayer:
         game = Gomoku(board_size=BOARD_SIZE)
         
         while not game.is_game_over():
-            if game.current_player == 1 or opponent is None:
+            if game.next_player == 1 or opponent is None:
                 move = self.best_move(game, 100)
             else:
                 move = opponent.best_move(game, 100)

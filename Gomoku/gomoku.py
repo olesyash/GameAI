@@ -3,8 +3,8 @@ import numpy as np
 import torch
 
 ONGOING = -17
-BLACK_WIN = 1
-WHITE_WIN = -1
+BLACK_WIN = BLACK = 1
+WHITE_WIN = WHITE = -1
 DRAW = 0
 WIN_COUNT = 4
 BOARD_SIZE = 7
@@ -24,7 +24,7 @@ class Gomoku:
         """
         self.board_size = board_size
         self.board = np.zeros((board_size, board_size), dtype=int)
-        self.current_player = 1  # 1 for black, -1 for white
+        self.next_player = 1  # 1 for black, -1 for white
         self.move_history = []
         self.status = ONGOING  # -17 for ongoing, will be player number (1 or 2) when won, or 0 for draw
         self.last_move = None
@@ -33,7 +33,7 @@ class Gomoku:
     def reset(self):
         """Reset the game to initial state."""
         self.board = np.zeros((self.board_size, self.board_size), dtype=int)
-        self.current_player = 1
+        self.next_player = 1
         self.move_history.clear()
         self.last_move = None
         self.status = ONGOING
@@ -78,20 +78,22 @@ class Gomoku:
         if not self.is_legal_move(row, col) or self.status != ONGOING:
             return False
 
-        self.board[row, col] = self.current_player
+        self.board[row, col] = self.next_player
         self.move_history.append((row, col))
         self.last_move = (row, col)
 
         # Check for win
         if self._check_win(row, col):
-            self.status = self.current_player
-            self.winner = self.current_player
+            self.status = self.next_player
+            self.winner = self.next_player
         elif len(self.move_history) == self.board_size * self.board_size:
             self.status = 0  # Draw
-
-        # Switch player
-        self.current_player = 0 - self.current_player  # Switches between 1 and -1
+        self.switch_player()
         return True
+
+    def switch_player(self):
+        """Switch the current player."""
+        self.next_player = 0 - self.next_player
 
     def unmake_move(self):
         """Undo the last move."""
@@ -101,7 +103,7 @@ class Gomoku:
         row, col = self.move_history.pop()
         self.last_move = self.move_history[-1] if self.move_history else None
         self.board[row, col] = 0
-        self.current_player = 0 - self.current_player
+        self.switch_player()
         self.status = ONGOING
         self.winner = None
         return True
@@ -164,7 +166,7 @@ class Gomoku:
         Returns:
             int: Current player (1 for black, 2 for white)
         """
-        return self.current_player
+        return self.next_player
 
     def is_game_over(self):
         """Check if the game is over.
@@ -190,7 +192,7 @@ class Gomoku:
         """
         clone = Gomoku(self.board_size)
         clone.board = self.board.copy()
-        clone.current_player = self.current_player
+        clone.next_player = self.next_player
         clone.move_history = self.move_history.copy()
         clone.last_move = self.last_move
         clone.status = self.status
@@ -221,7 +223,7 @@ class Gomoku:
         
         encoded_game = {}
         encoded_game[BOARD_TENSOR] = board_tensor
-        encoded_game[CURRENT_PLAYER] = self.current_player
+        encoded_game[CURRENT_PLAYER] = self.next_player
         encoded_game[STATUS] = status_tensor
         encoded_game[POLICY_PROBS] = policy_probs
         
@@ -230,15 +232,6 @@ class Gomoku:
     def decode(self, game_array):
         """ Decode the Game from vector"""
         self.board = game_array[:-2].reshape(self.board_size, self.board_size)
-        self.current_player = int(game_array[-2])
+        self.next_player = int(game_array[-2])
         self.status = int(game_array[-1])
-        self.winner = self.current_player if self.status == self.current_player else None
-
-    def get_reward(self):
-        """Returns the reward for the current game state relative to player"""
-        if self.status == self.current_player:
-            return -1
-        elif self.status == ONGOING:  # Game is ongoing; no reward yet
-            return 0
-        else:
-            return 1
+        self.winner = self.next_player if self.status == self.next_player else None

@@ -1,10 +1,12 @@
 from copy import deepcopy
 import random
 import math
+from gomoku import BLACK_WIN, WHITE_WIN, BLACK, WHITE, ONGOING
+import numpy as np
 
 
 class MCTSPlayer:
-    def __init__(self, exploration_weight=1):
+    def __init__(self, exploration_weight=2):
         self.exploration_weight = exploration_weight
         self.state_dict = {}  # Dictionary to store states
 
@@ -38,7 +40,12 @@ class MCTSPlayer:
             # 4. Backpropagation: Update the value and visit counts up the tree.
             self.backpropagate(node, reward)
 
+        # Print tree before returning best move
+        print("\nFinal Tree Structure:")
+        self.print_tree(root)
+        
         # Return the best child node (without exploration weight).
+        
         return root.best_child(exploration_weight=0)
 
     def select(self, node):
@@ -59,29 +66,79 @@ class MCTSPlayer:
                 return child_node
         raise Exception("No moves to expand")
 
+
     def simulate(self, node):
         """Simulation phase: Play a random game until a terminal state is reached."""
         current_state = node.state.clone()  # Clone the state for simulation
+        
         while not current_state.is_game_over():
-            move = random.choice(current_state.legal_moves())
-            current_state.make_move(move)
-
-        # non relative to current player !!! AI is always -1!!!
-        # For AI to win we need -1 in the status
-        if current_state.status == -1:
-            return 1
-        elif current_state.status == 1:
-            return -1
-        else:
-            return 0
+            # First check for any winning moves
+            moves = current_state.legal_moves()
+            winning_move = None
+            
+            for move in moves:
+                test_state = current_state.clone()
+                test_state.make_move(move)
+                if test_state.status != ONGOING:
+                    winning_move = move
+                    break
+            
+            # Make winning move if found, otherwise random
+            if winning_move:
+                current_state.make_move(winning_move)
+            else:
+                # Weight center moves more heavily
+                center_x, center_y = current_state.board_size // 2, current_state.board_size // 2
+                weighted_moves = []
+                for move in moves:
+                    # Distance from center
+                    dist = abs(move[0] - center_x) + abs(move[1] - center_y)
+                    weight = 1.0 / (dist + 1)  # Avoid division by zero
+                    weighted_moves.extend([move] * int(weight * 10))
+                
+                move = random.choice(weighted_moves if weighted_moves else moves)
+                current_state.make_move(move)
+        
+        # Relative to current player !!!
+        return node.get_reward(current_state)
 
     def backpropagate(self, node, reward):
-        """Backpropagation phase: Update the node values and visits up the tree."""
+        """Backpropagate values through the tree"""
         while node is not None:
             node.visits += 1
-            node.value += reward
-            reward = -reward
+            # Simple moving average update
+            node.value += (reward - node.value) / node.visits
+            reward = -reward  # Switch reward for parent
             node = node.parent
+
+    def print_tree(self, node, depth=0, max_depth=2):
+        """Print the tree structure for debugging."""
+        if depth > max_depth:
+            return
+
+        indent = "  " * depth
+        move_str = f"Move: {node.state.last_move}" if node.state.last_move else "Root"
+        uct = 0
+        if node.parent and node.visits > 0:
+            exploration = self.exploration_weight * math.sqrt(math.log(node.parent.visits) / node.visits)
+            exploitation = node.value / node.visits
+            uct = exploitation + exploration
+
+        print(f"{indent}{move_str} [Player: {node.acting_player}, "
+              f"Visits: {node.visits}, Value: {node.value:.2f}, "
+              f"UCT: {uct:.2f}]")
+
+        # Sort children by UCT value for better visualization
+        if node.children:
+            sorted_children = sorted(node.children, 
+                                  key=lambda n: n.value/n.visits + 
+                                  self.exploration_weight * math.sqrt(math.log(node.visits)/n.visits) 
+                                  if n.visits > 0 else float('inf'),
+                                  reverse=True)
+            for child in sorted_children[:3]:  # Show top 3 children
+                self.print_tree(child, depth + 1, max_depth)
+            if len(node.children) > 3:
+                print(f"{indent}  ... {len(node.children)-3} more children")
 
 
 class MCTSNode:
@@ -91,23 +148,37 @@ class MCTSNode:
         self.children = []  # Child nodes
         self.visits = 0  # Number of times this node was visited
         self.value = 0  # Total reward accumulated for this node
+        self.acting_player = 0 - state.next_player  # Current player
 
     def is_fully_expanded(self):
         """Checks if all possible moves have been expanded."""
         return len(self.children) == len(self.state.legal_moves())
-
-    def get_value(self, exploration_weight):
+        
+    def best_child(self, exploration_weight=2):
+        """Select node with best UCT value.
+        Returns:
+            Node: Best child.
+        """
         if self.visits == 0:
             # we prioritize nodes that are not explored
-            return 0 if exploration_weight == 0 else float('inf')
-        else:
-            return self.value / self.visits + exploration_weight * math.sqrt(math.log(self.parent.visits) / self.visits)
+            return float('-inf') if exploration_weight == 0 else float('inf')
+        best_uct = -np.inf
+        best_node = None
+        for child in self.children:
+            uct = (child.value / child.visits) + exploration_weight * np.sqrt(np.log(self.visits) / child.visits)
+            if uct > best_uct:
+                best_uct = uct
+                best_node = child
+        # Avoid error if node has no children
+        if best_node is None:
+            return self
+        return best_node
 
-    def best_child(self, exploration_weight=1.4):
-        """Selects the best child node based on UCT (Upper Confidence Bound for Trees)."""
-        max_value = max(self.children, key=lambda n: n.get_value(exploration_weight)).get_value(exploration_weight)
-        # select nodes with the highest UCT value
-        max_nodes = [n for n in self.children if n.get_value(exploration_weight) == max_value]
-        # randomly select on to expand upon
-        best = random.choice(max_nodes)
-        return best
+    def get_reward(self, state):
+        """Returns the reward for the current game state relative to player"""
+        if state.status == self.acting_player:
+            return 1
+        elif state.status == 0:  # Draw
+            return 0
+        else:
+            return -1
