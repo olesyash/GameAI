@@ -168,7 +168,7 @@ class GomokuGUI:
         # Perform AI move
         # MCTS
         if self.game_mode == MCTS:
-            best_node = self.mcts.search(self.game.clone(), iterations=1000)
+            best_node = self.mcts.search(self.game.clone(), iterations=3000)
             if self.game.make_move(best_node.state.last_move):
                     self.draw_board()
         # PUCT
@@ -176,10 +176,14 @@ class GomokuGUI:
             best_move = self.puct_player.best_move(self.game.clone(), iterations=1000)
             if self.game.make_move(best_move):
                 self.draw_board()
-        # Check game status after AI move
-        self.game.is_game_over()
+
         self.ai_thinking = False
         self.canvas.config(cursor="arrow")
+
+        # Check game status after AI move
+        if self.game.is_game_over():
+            self.show_winner_box()
+            return
 
     def reset_game(self):
         """Reset the game."""

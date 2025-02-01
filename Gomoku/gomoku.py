@@ -6,8 +6,8 @@ ONGOING = -17
 BLACK_WIN = 1
 WHITE_WIN = -1
 DRAW = 0
-WIN_COUNT=4
-BOARD_SIZE=7
+WIN_COUNT = 4
+BOARD_SIZE = 7
 BOARD_TENSOR = "board_tensor"
 POLICY_PROBS = "policy_probs"
 STATUS = "status"
@@ -237,9 +237,8 @@ class Gomoku:
     def get_reward(self):
         """Returns the reward for the current game state relative to player"""
         if self.status == self.current_player:
-            return 1
-        elif self.status == 0:
-            return 0.5
-        else:
-            # Game is ongoing; no reward yet
+            return -1
+        elif self.status == ONGOING:  # Game is ongoing; no reward yet
             return 0
+        else:
+            return 1

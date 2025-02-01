@@ -6,10 +6,23 @@ import math
 class MCTSPlayer:
     def __init__(self, exploration_weight=1):
         self.exploration_weight = exploration_weight
+        self.state_dict = {}  # Dictionary to store states
+
+    def get_state_hash(self, state):
+        """Create a unique hash for a game state."""
+        return hash(state.board.tobytes())
+
+    def get_or_create_node(self, state, parent=None):
+        """Get existing node from dictionary or create a new one."""
+        state_hash = self.get_state_hash(state)
+        if state_hash not in self.state_dict:
+            self.state_dict[state_hash] = MCTSNode(state, parent)
+        return self.state_dict[state_hash]
 
     def search(self, initial_state, iterations=1000):
         """Performs MCTS to find the best move."""
-        root = MCTSNode(initial_state)
+        self.state_dict.clear()  # Clear the state dictionary for new search
+        root = self.get_or_create_node(initial_state)
 
         for _ in range(iterations):
             # 1. Selection: Traverse the tree using UCT until reaching a leaf node.
@@ -41,7 +54,7 @@ class MCTSPlayer:
             if move not in [child.state.last_move for child in node.children]:
                 new_state = node.state.clone()
                 new_state.make_move(move)
-                child_node = MCTSNode(new_state, parent=node)
+                child_node = self.get_or_create_node(new_state, parent=node)
                 node.children.append(child_node)
                 return child_node
         raise Exception("No moves to expand")
@@ -52,14 +65,22 @@ class MCTSPlayer:
         while not current_state.is_game_over():
             move = random.choice(current_state.legal_moves())
             current_state.make_move(move)
-        return current_state.get_reward()
+
+        # non relative to current player !!! AI is always -1!!!
+        # For AI to win we need -1 in the status
+        if current_state.status == -1:
+            return 1
+        elif current_state.status == 1:
+            return -1
+        else:
+            return 0
 
     def backpropagate(self, node, reward):
         """Backpropagation phase: Update the node values and visits up the tree."""
         while node is not None:
             node.visits += 1
             node.value += reward
-            reward = 1 -reward
+            reward = -reward
             node = node.parent
 
 
