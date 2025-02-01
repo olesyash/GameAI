@@ -3,15 +3,27 @@ from tkinter import messagebox
 from gomoku import Gomoku
 from MCTS import MCTSPlayer
 from puct import PUCTPlayer,PUCTNode
+from gomoku import ONGOING
+
+
+PUCT = 'puct'
+MCTS = 'mcts'
+MANUAL = 'manual'
+
 
 class GomokuGUI:
-    def __init__(self, master):
+    def __init__(self, master, game_mode=MANUAL):
         self.master = master
         self.master.title("Gomoku")
         self.game = Gomoku()
-        self.puct_player= PUCTPlayer(exploration_weight=1.4, game=self.game)
+        self.game_mode = game_mode
+        
+        # Initialize players based on game mode
+        if game_mode == MCTS:
+            self.mcts = MCTSPlayer(exploration_weight=1.4)
+        elif game_mode == PUCT:
+            self.puct_player = PUCTPlayer(exploration_weight=1.4, game=self.game)
 
-        #self.mcts = MCTSPlayer(exploration_weight=1.4)
         self.cell_size = 40
         self.padding = 20
         self.ai_thinking = False
@@ -115,7 +127,7 @@ class GomokuGUI:
     def handle_click(self, event):
         """Handle mouse click event."""
         # Block all clicks during AI turn
-        if self.ai_thinking or self.game.current_player != 1:
+        if self.ai_thinking:
             return
 
         # Block if game is over
@@ -142,49 +154,93 @@ class GomokuGUI:
             self.show_winner_box()
             return
 
-        # Set thinking flag and show loader
-        self.ai_thinking = True
-        self.canvas.config(cursor="watch")
-        self.master.update()
-
-        # Make AI move
-        self.execute_ai_move()
+        # AI move for MCTS or PUCT modes
+        if self.game_mode in [MCTS, PUCT] and self.game.status == ONGOING:
+            self.ai_thinking = True
+            self.canvas.config(cursor="watch")
+            self.master.update()
+            self.execute_ai_move()
+        else:
+            return
 
     def execute_ai_move(self):
-        """Execute the AI move and update the display."""
-        try:
-            # Perform AI move
-            best_move = self.puct_player.best_move(self.game, iterations=1000)
-            if best_move:
-                self.game.make_move(best_move)
+        """Execute AI move based on selected game mode."""
+        # Perform AI move
+        # MCTS
+        if self.game_mode == MCTS:
+            best_node = self.mcts.search(self.game.clone(), iterations=1000)
+            if self.game.make_move(best_node.state.last_move):
+                    self.draw_board()
+        # PUCT
+        elif self.game_mode == PUCT:
+            best_move = self.puct_player.best_move(self.game.clone(), iterations=1000)
+            if self.game.make_move(best_move):
                 self.draw_board()
-                self.master.update()
-
-                if self.game.is_game_over():
-                    self.show_winner_box()
-        finally:
-            # Reset thinking flag and loader
-            self.ai_thinking = False
-            self.canvas.config(cursor="")
-            self.master.update()
+        # Check game status after AI move
+        self.game.is_game_over()
+        self.ai_thinking = False
+        self.canvas.config(cursor="arrow")
 
     def reset_game(self):
         """Reset the game."""
-        self.ai_thinking = False
-        self.canvas.config(cursor="")
+        # Reset game state
         self.game.reset()
+        
+        # Redraw the board
         self.draw_board()
-        self.master.update()
+        
+        # Reinitialize AI player if needed
+        if self.game_mode == MCTS:
+            self.ai_player = MCTSPlayer(exploration_weight=1.4)
+        elif self.game_mode == PUCT:
+            self.ai_player = PUCTPlayer(exploration_weight=1.4, game=self.game)
 
     def undo_move(self):
         """Undo the last move."""
         if self.game.unmake_move():
             self.draw_board()
 
+    @staticmethod
+    def select_game_mode():
+        """Create a window to select game mode."""
+        root = tk.Tk()
+        root.title("Gomoku - Game Mode Selection")
+        root.geometry("300x200")
+        
+        mode_var = tk.StringVar(value="manual")
+        result = {"mode": "manual"}  # Using a dict to store the result
+        
+        def on_submit():
+            result["mode"] = mode_var.get()  # Store the selected mode
+            root.quit()
+
+        label = tk.Label(root, text="Select Game Mode", font=("Arial", 14))
+        label.pack(pady=10)
+
+        modes = [
+            ("Manual Game", MANUAL),
+            ("MCTS Player", MCTS),
+            ("PUCT Player", PUCT)
+        ]
+
+        for text, mode in modes:
+            rb = tk.Radiobutton(root, text=text, variable=mode_var, value=mode)
+            rb.pack(pady=5)
+
+        start_button = tk.Button(root, text="Start Game", command=on_submit)
+        start_button.pack(pady=10)
+
+        root.mainloop()
+        selected_mode = result["mode"]  # Get the stored mode
+        root.destroy()
+        return selected_mode
+
 
 def main():
+    """Main game method with mode selection."""
+    game_mode = GomokuGUI.select_game_mode()
     root = tk.Tk()
-    app = GomokuGUI(root)
+    app = GomokuGUI(root, game_mode)
     root.mainloop()
 
 
