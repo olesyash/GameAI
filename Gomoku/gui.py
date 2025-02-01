@@ -123,6 +123,10 @@ class GomokuGUI:
             messagebox.showinfo("Game Over", f"{color} wins!")
         else:
             messagebox.showinfo("Game Over", "It's a draw!")
+        
+        # Print board state before showing dialog
+        self.game.print_board()
+        self.master.update()  # Force GUI update
 
     def handle_click(self, event):
         """Handle mouse click event."""

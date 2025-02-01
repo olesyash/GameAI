@@ -1,6 +1,7 @@
 from base64 import encode
 import numpy as np
 import torch
+import sys
 
 ONGOING = -17
 BLACK_WIN = BLACK = 1
@@ -175,6 +176,11 @@ class Gomoku:
             bool: True if game is over, False otherwise
         """
         return self.status != ONGOING
+
+    def print_board(self):
+        print(self.board)
+        sys.stdout.flush()
+        sys.stderr.flush()
 
     def get_winner(self):
         """Get the winner of the game.

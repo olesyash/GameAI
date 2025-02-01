@@ -85,35 +85,39 @@ class MCTSPlayer:
         return child_node
 
     def simulate(self, node):
-        """Simulation phase: Play a random game until a terminal state is reached."""
-        current_state = node.state.clone()  # Clone the state for simulation
+        """Simulation phase: Play out the game with a mix of heuristic and random moves."""
+        current_state = node.state.clone()
         
         while not current_state.is_game_over():
-            # First check for any winning moves
             moves = current_state.legal_moves()
-            winning_move = None
             
-            # First try to find winning moves
+            # Check for winning moves (for either player)
             for move in moves:
                 test_state = current_state.clone()
                 test_state.make_move(move)
-                if test_state.status != ONGOING:
-                    current_state = test_state
-                    break
+                if test_state.is_game_over():
+                    current_state.make_move(move)
+                    continue
             
-            # If no winning moves found, make a weighted random move
-            if current_state.status == ONGOING:
-                center_x, center_y = current_state.board_size // 2, current_state.board_size // 2
-                weighted_moves = []
+            # If no winning moves, make a weighted random move
+            if not current_state.is_game_over():
+                weights = []
                 for move in moves:
-                    dist = abs(move[0] - center_x) + abs(move[1] - center_y)
-                    weight = max(1, 5 - dist)  # Higher weight for center moves
-                    weighted_moves.extend([move] * weight)
+                    x, y = move
+                    # Prefer central positions
+                    center_x, center_y = current_state.board_size // 2, current_state.board_size // 2
+                    dist_to_center = abs(x - center_x) + abs(y - center_y)
+                    weight = 1.0 / (1 + dist_to_center)
+                    weights.append(weight)
                 
-                move = random.choice(weighted_moves)
+                total = sum(weights)
+                if total > 0:
+                    weights = [w/total for w in weights]
+                    move = random.choices(moves, weights=weights)[0]
+                else:
+                    move = random.choice(moves)
                 current_state.make_move(move)
-
-        # Relative to current player !!!
+        
         return node.get_reward(current_state)
 
     def backpropagate(self, node, reward):
@@ -169,7 +173,7 @@ class MCTSNode:
         if not self.state.legal_moves():
             return True
         return len(self.children) == len(self.state.legal_moves())
-        
+
     def best_child(self, exploration_weight=2):
         """Select node with best UCT value.
         Returns:
