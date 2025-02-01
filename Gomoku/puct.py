@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from gomoku import Gomoku, BOARD_SIZE, BOARD_TENSOR, POLICY_PROBS, STATUS
 import time
 
+
 class PUCTNode:
     def __init__(self,state, parent=None, q=0, p=0):
         self.Q = q
@@ -32,6 +33,7 @@ class PUCTNode:
     def is_fully_expanded(self):
         """Checks if all possible moves have been expanded."""
         return len(self.children) == len(self.state.legal_moves())
+
 
 class PUCTPlayer:
     def __init__(self, exploration_weight, game):

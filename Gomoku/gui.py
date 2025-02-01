@@ -9,8 +9,7 @@ class GomokuGUI:
         self.master = master
         self.master.title("Gomoku")
         self.game = Gomoku()
-        #self.PUCTNode = PUCTNode(state=self.game)
-        self.PUCTPlayer=PUCTPlayer(exploration_weight=1.4,game=self.game)
+        self.puct_player= PUCTPlayer(exploration_weight=1.4, game=self.game)
 
         #self.mcts = MCTSPlayer(exploration_weight=1.4)
         self.cell_size = 40
@@ -151,24 +150,13 @@ class GomokuGUI:
         # Make AI move
         self.execute_ai_move()
 
-    def ai_turn(self):
-        #best_node = self.mcts.search(self.game.clone(), iterations=1000)
-
-        best_node = self.PUCTPlayer.best_move(self.game, iterations=1000)
-        if self.game.make_move(best_node.state.last_move):
-            self.draw_board()
-        if self.game.is_game_over():
-            self.show_winner_box()
-        """Handle AI's turn."""
-        self.execute_ai_move()
-
     def execute_ai_move(self):
         """Execute the AI move and update the display."""
         try:
             # Perform AI move
-            best_node = self.PUCTPlayer.best_move(self.game, iterations=1000)
-            if best_node and best_node.state.last_move:
-                self.game.make_move(best_node.state.last_move)
+            best_move = self.puct_player.best_move(self.game, iterations=1000)
+            if best_move:
+                self.game.make_move(best_move)
                 self.draw_board()
                 self.master.update()
 
