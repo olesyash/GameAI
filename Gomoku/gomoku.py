@@ -235,9 +235,13 @@ class Gomoku:
         
         return encoded_game
 
-    def decode(self, game_array):
-        """ Decode the Game from vector"""
-        self.board = game_array[:-2].reshape(self.board_size, self.board_size)
-        self.next_player = int(game_array[-2])
-        self.status = int(game_array[-1])
-        self.winner = self.next_player if self.status == self.next_player else None
+    def decode(self, value):
+        """ Decode the value from vector(-1, 1) to actual value 0,1,-1
+            Use thresholds to determine the value
+        """
+        if value > 0.3:  # Strong positive -> 1
+            return 1
+        elif value < -0.3:  # Strong negative -> -1
+            return -1
+        else:  # Values close to zero -> 0
+            return 0

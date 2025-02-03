@@ -2,6 +2,7 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
+from gomoku import BOARD_SIZE, BOARD_TENSOR, POLICY_PROBS, STATUS
 
 
 class GameNetwork(nn.Module):
@@ -42,9 +43,10 @@ class GameNetwork(nn.Module):
     #
     #     return value, policy
 
-    def __init__(self, board_size):
+    def __init__(self, board_size, device):
         super(GameNetwork, self).__init__()
         self.board_size = board_size
+        self.device = device
         input_size = board_size * board_size  # Flattened board
 
         # Shared layers
@@ -110,16 +112,16 @@ class GameNetwork(nn.Module):
                 - value: float value prediction (-1 to 1)
         """
         # Prepare state for neural network
-        board_tensor = torch.FloatTensor(state.board).view(1, 1, self.board_size, self.board_size)
-        board_tensor = board_tensor.to(next(self.parameters()).device)
-        
+        encoded_game = state.encode()
+        board_tensor = encoded_game[BOARD_TENSOR].to(self.device)
+
         # Get policy and value predictions
         with torch.no_grad():
             policy, value = self.forward(board_tensor)
             # Move tensors to CPU before converting to numpy
             policy = policy.cpu().view(-1).numpy()
             value = value.cpu().item()
-
+        value = state.decode(value)
         return policy, value  # Return in order expected by PUCT
 
     def save_model(self, path='models/gomoku_model.pt'):

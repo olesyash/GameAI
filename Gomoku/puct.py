@@ -1,4 +1,8 @@
 from copy import deepcopy
+import random
+import matplotlib.pyplot as plt
+import numpy as np
+
 from nn import GameNetwork
 import torch
 import torch.nn.functional as F
@@ -14,6 +18,7 @@ class PUCTNode:
         self.children = []
         self.parent = parent
         self.state = state
+        self.acting_player = 0 - state.next_player  # Current player
 
     def get_puct(self, exploration_weight):
         """Get the PUCT value of the node."""
@@ -38,65 +43,81 @@ class PUCTNode:
 class PUCTPlayer:
     def __init__(self, exploration_weight, game):
         self.exploration_weight = exploration_weight
-        self.model = GameNetwork(board_size=game.board_size)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = GameNetwork(board_size=game.board_size, device=self.device)
         self.value_weight = 0.5  # λ in loss function
         # Set device
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
         self.model.load_model('models/best_gomoku_model.pt')
 
     def select(self, node):
-        """Selection phase: Navigate the tree using PUCT."""
-        state = deepcopy(node.state)
-        while not node.state.is_game_over() and node.is_fully_expanded():
-            node = node.best_child(self.exploration_weight)
-        return node, state
+        """Selection phase: Navigate the tree using UCT until reaching a leaf node."""
+        current = node
+        while not current.state.is_game_over():
+            if not current.children:  # If node has no children yet
+                return current
+            if not current.is_fully_expanded():
+                return current
+            current = current.best_child(self.exploration_weight)
+        return current
     
     def expand(self, node, policy):
-        """Expansion phase: Add a new child node for an unvisited move."""
+        """Expansion phase: Add a new child node by exploring an unvisited move."""
+        if node.state.is_game_over():
+            return node
         possible_moves = node.state.legal_moves()
+        if not possible_moves:  # No legal moves available
+            return node
 
-        for move in possible_moves:
-            if move not in [child.state.last_move for child in node.children]:
-                child_position = node.state.clone()
-                child_position.make_move(move)
-                # Convert (row, col) to index in the policy vector
-                move_index = move[0] * node.state.board_size + move[1]
-                # Get probability for this move from policy vector
-                child_node = PUCTNode(child_position, parent=node, p=policy[move_index])
-                node.children.append(child_node)
-                return child_node
-        raise Exception("No moves to expand")
+        expanded_moves = {child.state.last_move for child in node.children}
+        unexpanded_moves = [move for move in possible_moves if move not in expanded_moves]
+        
+        if not unexpanded_moves:  # All moves are expanded
+            return node.best_child(self.exploration_weight)
+            
+        # Choose a random unexpanded move
+        move = random.choice(unexpanded_moves)
+        child_position = node.state.clone()
+        child_position.make_move(move)
+      
+        # Convert (row, col) to index in the policy vector
+        move_index = move[0] * node.state.board_size + move[1]
+        # Get probability for this move from policy vector
+        child_node = PUCTNode(child_position, parent=node, p=policy[move_index])
+        node.children.append(child_node)
+        return child_node
     
-    def back_propagate(self, node, state, value):
+    def back_propagate(self, node, value):
         while node is not None:
             node.N += 1 # Increment the visit count
             node.Q += (1/node.N) * (value - node.Q) # Update the value
             node = node.parent
             value = -value
 
-
     def choose_best_move(self, root_node):
         best_child = max(root_node.children, key=lambda child: child.N)
         return best_child.state.last_move
 
-    def best_move(self,initial_state, iterations):
+    def best_move(self, initial_state, iterations):
         root = PUCTNode(initial_state)
         
         for _ in range(iterations):
             # 1. Selection: Traverse the tree using UCT until reaching a leaf node.
-            node, state = self.select(root)
+            node = self.select(root)
             # 2. Expansion: Add a new child node by exploring an unvisited move.
             if not node.state.is_game_over():
                 policy, value = self.model.predict(node.state)  
                 if node.Q == 0:
                     node.Q = value
                 node = self.expand(node, policy)
-                self.back_propagate(node, state, value)
+
+                if root.acting_player != value:
+                    value = -value
+
+                self.back_propagate(node, value)
 
         # Return the best child node (without exploration weight)
         return self.choose_best_move(root)
-
 
     def train_step(self, game, optimizer):
         """Train the neural network using MCTS visit counts and game outcome
@@ -129,6 +150,24 @@ class PUCTPlayer:
         optimizer.step()
         
         return total_loss.item(), policy_loss.item(), value_loss.item()
+
+    def plot_training_loss(self, losses, save_path='plots/training_loss.png'):
+        """Plot and save the training loss graph."""
+        # Ensure the plots directory exists
+        import os
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        
+        plt.figure(figsize=(10, 6))
+        plt.plot(losses, label='Training Loss')
+        plt.title('Training Loss Over Time')
+        plt.xlabel('Training Steps')
+        plt.ylabel('Loss')
+        plt.grid(True)
+        plt.legend()
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')  # Higher DPI for better quality
+        plt.close()
+        
+        print(f"Loss plot saved to: {os.path.abspath(save_path)}")
 
     def train(self, num_episodes=1000, batch_size=32, learning_rate=0.001):
         """Train the model through self-play
@@ -210,11 +249,10 @@ class PUCTPlayer:
             if episode % 100 == 0:
                 self.model.save_model(f'models/gomoku_model_checkpoint_{episode}.pt')
             
-            # Early stopping
-            if no_improvement_count >= patience:
-                print(f"No improvement for {patience} episodes. Early stopping...")
-                break
-        
+            # Plot loss every 10 episodes
+            if episode % 10 == 0:
+                self.plot_training_loss([avg_episode_loss for _ in range(episode+1)])
+
         print("Training completed!")
         print(f"Best model saved with loss: {best_loss:.4f}")
         

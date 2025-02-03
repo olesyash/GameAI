@@ -108,6 +108,7 @@ class ConnectFour:
         """Check if the game has ended in a win or draw."""
         # The game is terminal if there's a winner or the board is full (draw).
         return self.status in {self.RED_WIN, self.YELLOW_WIN, self.DRAW}
+
     def get_reward(self):
         """Returns the reward for the current game state."""
         if self.status == self.RED_WIN:

@@ -20,7 +20,7 @@ class GomokuGUI:
         
         # Initialize players based on game mode
         if game_mode == MCTS:
-            self.mcts = MCTSPlayer(exploration_weight=1.4)
+            self.mcts = MCTSPlayer(exploration_weight=2)
         elif game_mode == PUCT:
             self.puct_player = PUCTPlayer(exploration_weight=1.4, game=self.game)
 
