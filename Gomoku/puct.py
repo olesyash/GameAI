@@ -67,10 +67,12 @@ class PUCTPlayer:
         """Expansion phase: Add a new child node by exploring an unvisited move."""
         if node.state.is_game_over():
             return node
+            
         possible_moves = node.state.legal_moves()
         if not possible_moves:  # No legal moves available
             return node
 
+        # Use set for O(1) lookup
         expanded_moves = {child.state.last_move for child in node.children}
         unexpanded_moves = [move for move in possible_moves if move not in expanded_moves]
         
@@ -81,18 +83,19 @@ class PUCTPlayer:
         move = random.choice(unexpanded_moves)
         child_position = node.state.clone()
         child_position.make_move(move)
-      
+        
         # Convert (row, col) to index in the policy vector
         move_index = move[0] * node.state.board_size + move[1]
-        # Get probability for this move from policy vector
-        child_node = PUCTNode(child_position, parent=node, p=policy[move_index])
+        move_prob = policy[move_index].item() if isinstance(policy, torch.Tensor) else policy[move_index]
+        
+        child_node = PUCTNode(child_position, parent=node, p=move_prob)
         node.children.append(child_node)
         return child_node
-    
+
     def back_propagate(self, node, value):
         while node is not None:
             node.N += 1 # Increment the visit count
-            node.Q += (1/node.N) * (value - node.Q) # Update the value
+            node.Q += (1/node.N) * (value - node.Q)  # Update the value
             node = node.parent
             value = -value
 
@@ -111,21 +114,17 @@ class PUCTPlayer:
         """
         # Create noise array of same size as probs
         noise = np.zeros_like(probs)
-        
-        # Generate Dirichlet noise only for legal moves
+        move_indices = [move[0] * BOARD_SIZE + move[1] for move in legal_moves]
         legal_noise = np.random.dirichlet([alpha] * len(legal_moves))
+        noise[move_indices] = legal_noise
         
-        # Place noise only in legal move positions
-        for i, move in enumerate(legal_moves):
-            idx = move[0] * BOARD_SIZE + move[1]
-            noise[idx] = legal_noise[i]
-            
-        # Mix noise with original probabilities
+        # Mix noise with original probabilities using numpy operations
         noisy_probs = (1 - epsilon) * probs + epsilon * noise
         
-        # Renormalize to ensure sum = 1
-        if np.sum(noisy_probs) > 0:
-            noisy_probs = noisy_probs / np.sum(noisy_probs)
+        # Normalize only if needed
+        sum_probs = np.sum(noisy_probs)
+        if sum_probs > 0:
+            noisy_probs /= sum_probs
             
         return noisy_probs
 

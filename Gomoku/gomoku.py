@@ -17,7 +17,6 @@ IS_ONGOING = "is_ongoing"
 VALUE = "value"
 
 
-
 class Gomoku:
     def __init__(self, board_size=BOARD_SIZE):
         """Initialize the Gomoku game.
