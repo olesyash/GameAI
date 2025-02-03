@@ -2,6 +2,7 @@ from gomoku import Gomoku, BOARD_SIZE
 from puct import PUCTPlayer
 import torch
 
+
 def train_model():
     # Initialize game and player
     game = Gomoku(board_size=BOARD_SIZE)
@@ -15,8 +16,8 @@ def train_model():
     # Start training
     print("Starting training...")
     player.train(num_episodes=num_episodes, 
-                batch_size=batch_size, 
-                learning_rate=learning_rate)
+                 batch_size=batch_size,
+                 learning_rate=learning_rate)
     
     return player
 

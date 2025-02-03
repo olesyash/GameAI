@@ -13,6 +13,8 @@ BOARD_TENSOR = "board_tensor"
 POLICY_PROBS = "policy_probs"
 STATUS = "status"
 CURRENT_PLAYER = "current_player"
+IS_ONGOING = "is_ongoing"
+VALUE = "value"
 
 
 
@@ -225,13 +227,20 @@ class Gomoku:
         
         # Convert to tensors with correct shapes
         policy_probs = torch.FloatTensor(policy_probs)
-        status_tensor = torch.FloatTensor([[self.status]])  # Shape: [1, 1]
+        
+        # Store both the game status and the value for training
+        game_status = self.status  # Keep original status (-17 for ongoing)
+        training_value = self.status if self.status != ONGOING else 0  # Convert to 0 for training
+        
+        status_tensor = torch.FloatTensor([[training_value]])  # Shape: [1, 1]
         
         encoded_game = {}
         encoded_game[BOARD_TENSOR] = board_tensor
-        encoded_game[CURRENT_PLAYER] = self.next_player
-        encoded_game[STATUS] = status_tensor
         encoded_game[POLICY_PROBS] = policy_probs
+        encoded_game[STATUS] = status_tensor
+        encoded_game[IS_ONGOING] = game_status == ONGOING  # Add flag for game state
+        encoded_game[VALUE] = training_value
+        encoded_game[CURRENT_PLAYER] = self.next_player
         
         return encoded_game
 
