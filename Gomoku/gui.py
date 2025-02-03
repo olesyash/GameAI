@@ -172,12 +172,12 @@ class GomokuGUI:
         # Perform AI move
         # MCTS
         if self.game_mode == MCTS:
-            best_node = self.mcts.search(self.game.clone(), iterations=7000)
+            best_node = self.mcts.search(self.game.clone(), iterations=10000)
             if self.game.make_move(best_node.state.last_move):
                 self.draw_board()
         # PUCT
         elif self.game_mode == PUCT:
-            best_move = self.puct_player.best_move(self.game.clone(), iterations=1000)
+            best_move = self.puct_player.best_move(self.game.clone(), iterations=10000)
             if self.game.make_move(best_move):
                 self.draw_board()
 
