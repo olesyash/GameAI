@@ -154,7 +154,11 @@ class PUCTPlayer:
             
             # 2. Expansion and Evaluation
             if not node.state.is_game_over():
-                if node != root and not is_training:
+                if is_training:
+                    if node != root:
+                        # Get policy and value from neural network
+                        curr_policy, value = self.model.predict(node.state)
+                else:
                     # Get policy and value from neural network
                     curr_policy, value = self.model.predict(node.state)
                 

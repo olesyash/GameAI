@@ -47,4 +47,4 @@ if __name__ == "__main__":
     
     # Play a game against itself
     print("\nPlaying a game (trained model against itself)...")
-    play_game(trained_player)
+    play_game(trained_player, trained_player)
