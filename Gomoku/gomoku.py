@@ -208,19 +208,23 @@ class Gomoku:
         return clone
 
     def encode(self):
-        """Encode the game state into policy probabilities and other features.
+        """Encode the game state for neural network input.
         
         Returns:
-            dict: Contains board tensor, policy probabilities, and game state
+            dict: Encoded game state with the following keys:
+                - BOARD_TENSOR: Board state tensor
+                - POLICY_PROBS: Policy probabilities
+                - STATUS: Game status
+                - IS_ONGOING: Whether game is ongoing
+                - VALUE: Game value for training
         """
-        # Create a 2-channel tensor: [board_state, current_player]
-        board_tensor = torch.zeros(1, 2, self.board_size, self.board_size)
+        encoded_game = {}
         
-        # Channel 1: Board state
-        board_tensor[0, 0] = torch.FloatTensor(self.board)
-        
-        # Channel 2: Current player (fill with 1 if black, -1 if white)
-        board_tensor[0, 1].fill_(self.get_current_player())
+        # Create board tensor (board state + current player)
+        board_flat = torch.FloatTensor(self.board).view(-1)  # Flatten the board
+        current_player = torch.FloatTensor([self.get_current_player()])  # Single value for player
+        board_tensor = torch.cat([board_flat, current_player])  # Concatenate
+        encoded_game[BOARD_TENSOR] = board_tensor.unsqueeze(0)  # Add batch dimension
         
         # Create policy probabilities (uniform over legal moves)
         policy_probs = np.zeros(self.board_size * self.board_size)

@@ -10,37 +10,37 @@ class GameNetwork(nn.Module):
     #     super(GameNetwork, self).__init__()
     #     self.board_size = board_size
     #     pass
-    #
+    #     
     #     self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
     #     self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
     #     self.conv3 = nn.Conv2d(64, 256, kernel_size=3, padding=1)
-    #
+    #     
     #     #policy head
     #     self.policy_conv = nn.Conv2d(256, 32, kernel_size=1)
     #     self.policy_fc = nn.Linear(32*board_size*board_size, board_size*board_size)
-    #
+    #     
     #     #value head
     #     self.value_conv = nn.Conv2d(256, 32, kernel_size=1)
     #     self.value_fc1 = nn.Linear(32*board_size*board_size, 256)
     #     self.value_fc2 = nn.Linear(256, 1)
-    #
+    #     
     # def forward(self, x):
     #     x = F.relu(self.conv1(x))
     #     x = F.relu(self.conv2(x))
     #     x = F.relu(self.conv3(x))
-    #
+    #     
     #     #policy head
     #     policy = self.policy_conv(x)
     #     policy = policy.view(-1, 32*self.board_size*self.board_size)
     #     policy = self.policy_fc(policy)
     #     policy = F.log_softmax(policy, dim=1)
-    #
+    #     
     #     #value head
     #     value = self.value_conv(x)
     #     value = value.view(-1, 32*self.board_size*self.board_size)
     #     value = F.relu(self.value_fc1(value))
     #     value = torch.tanh(self.value_fc2(value))
-    #
+    #     
     #     return value, policy
 
     def __init__(self, board_size, device):
@@ -48,8 +48,8 @@ class GameNetwork(nn.Module):
         self.board_size = board_size
         self.device = device
         
-        # Input size is now 2 * board_size * board_size (board state + current player plane)
-        input_size = 2 * board_size * board_size
+        # Input size is board_size^2 + 1 (flattened board + player value)
+        input_size = board_size * board_size + 1
 
         # Shared layers
         self.fc1 = nn.Linear(input_size, 256)
@@ -74,8 +74,7 @@ class GameNetwork(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
-        # Flatten the input (batch_size, 2, board_size, board_size) -> (batch_size, 2*board_size*board_size)
-        x = x.view(-1, 2 * self.board_size * self.board_size)
+        # Input x is already flattened with player value appended
         
         # Ensure input tensor is on the same device as the model
         x = x.to(next(self.parameters()).device)
@@ -92,7 +91,7 @@ class GameNetwork(nn.Module):
         policy = F.relu(self.policy_fc1(x))
         policy = self.dropout(policy)
         policy = self.policy_out(policy)
-        policy = F.softmax(policy, dim=1)
+        policy = F.softmax(policy, dim=0)  # Change to dim=0 since we have a single sample
         
         # Value head
         value = F.relu(self.value_fc1(x))
@@ -121,7 +120,7 @@ class GameNetwork(nn.Module):
         with torch.no_grad():
             policy, value = self.forward(board_tensor)
             # Move tensors to CPU before converting to numpy
-            policy = policy.cpu().view(-1).numpy()
+            policy = policy.cpu().numpy()  # No need for view(-1) since it's already flat
             value = value.cpu().item()
         value = state.decode(value)
         return policy, value  # Return in order expected by PUCT

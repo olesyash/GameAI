@@ -130,32 +130,38 @@ class PUCTPlayer:
         return noisy_probs
 
     def best_move(self, initial_state, iterations, is_training=False):
+        curr_policy = None
         root = PUCTNode(initial_state)
-      
+        
+        # Get initial policy and value for root node
+        policy, value = self.model.predict(root.state)
+        root.Q = value  # Set initial value for root
+        
+        # Add Dirichlet noise to root policy during training (AlphaZero way)
+        if is_training:
+            legal_moves = root.state.legal_moves()
+            
+            # Convert policy to numpy if it's a tensor
+            if isinstance(policy, torch.Tensor):
+                policy = policy.cpu().numpy()
+            
+            # Add Dirichlet noise to policy at root
+            policy = self.add_dirichlet_noise(policy, legal_moves)
+            curr_policy = torch.from_numpy(policy).float().to(self.device)
+
         for _ in range(iterations):
             # 1. Selection: Traverse the tree using UCT until reaching a leaf node
             node = self.select(root)
             
             # 2. Expansion and Evaluation
             if not node.state.is_game_over():
-                # Get policy and value from neural network
-                curr_policy, value = self.model.predict(node.state)
-                
-                # Convert policy to numpy if it's a tensor
-                if isinstance(curr_policy, torch.Tensor):
-                    curr_policy = curr_policy.squeeze().detach().cpu().numpy()
-                else:
-                    curr_policy = curr_policy.squeeze()
-                
-                # Add Dirichlet noise during training (but this is not the AlphaZero way!)
-                if is_training and node == root:
-                    legal_moves = node.state.legal_moves()
-                    curr_policy = self.add_dirichlet_noise(curr_policy, legal_moves)
-                    curr_policy = torch.from_numpy(curr_policy).float().to(self.device)
+                if node != root and not is_training:
+                    # Get policy and value from neural network
+                    curr_policy, value = self.model.predict(node.state)
                 
                 if node.Q == 0:  # Only set value if not already set
                     node.Q = value
-                
+
                 node = self.expand(node, curr_policy)
                 
                 # Flip value if needed based on player perspective
