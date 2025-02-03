@@ -47,24 +47,26 @@ class GameNetwork(nn.Module):
         super(GameNetwork, self).__init__()
         self.board_size = board_size
         self.device = device
-        input_size = board_size * board_size  # Flattened board
+        
+        # Input size is now 2 * board_size * board_size (board state + current player plane)
+        input_size = 2 * board_size * board_size
 
         # Shared layers
         self.fc1 = nn.Linear(input_size, 256)
         self.fc2 = nn.Linear(256, 512)
         self.fc3 = nn.Linear(512, 256)
-
+        
         # Policy head
         self.policy_fc1 = nn.Linear(256, 256)
         self.policy_out = nn.Linear(256, board_size * board_size)
-
+        
         # Value head
         self.value_fc1 = nn.Linear(256, 128)
         self.value_out = nn.Linear(128, 1)
-
+        
         # Dropout for regularization
         self.dropout = nn.Dropout(0.3)
-
+        
         # Initialize weights
         for m in self.modules():
             if isinstance(m, nn.Linear):
@@ -72,12 +74,12 @@ class GameNetwork(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
-        # Flatten the input
-        x = x.view(-1, self.board_size * self.board_size)
-
+        # Flatten the input (batch_size, 2, board_size, board_size) -> (batch_size, 2*board_size*board_size)
+        x = x.view(-1, 2 * self.board_size * self.board_size)
+        
         # Ensure input tensor is on the same device as the model
         x = x.to(next(self.parameters()).device)
-
+        
         # Shared layers
         x = F.relu(self.fc1(x))
         x = self.dropout(x)
@@ -85,19 +87,19 @@ class GameNetwork(nn.Module):
         x = self.dropout(x)
         x = F.relu(self.fc3(x))
         x = self.dropout(x)
-
+        
         # Policy head
         policy = F.relu(self.policy_fc1(x))
         policy = self.dropout(policy)
         policy = self.policy_out(policy)
         policy = F.softmax(policy, dim=1)
-
+        
         # Value head
         value = F.relu(self.value_fc1(x))
         value = self.dropout(value)
         value = self.value_out(value)
         value = torch.tanh(value)  # Ensure value is between -1 and 1
-
+        
         return policy, value.view(-1, 1)  # Ensure value has shape [batch_size, 1]
 
     def predict(self, state):
@@ -114,7 +116,7 @@ class GameNetwork(nn.Module):
         # Prepare state for neural network
         encoded_game = state.encode()
         board_tensor = encoded_game[BOARD_TENSOR].to(self.device)
-
+        
         # Get policy and value predictions
         with torch.no_grad():
             policy, value = self.forward(board_tensor)

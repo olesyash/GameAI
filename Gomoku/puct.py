@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 from gomoku import Gomoku, BOARD_SIZE, BOARD_TENSOR, POLICY_PROBS, STATUS
 import time
+import os
 
 
 class PUCTNode:
@@ -28,6 +29,7 @@ class PUCTNode:
     def best_child(self, exploration_weight):
         """Select the child node with the highest PUCT value."""
         max_puct = float('-inf')
+        best_child = None
         for child in self.children:
             puct = child.get_puct(exploration_weight)
             if puct > max_puct:
@@ -98,24 +100,71 @@ class PUCTPlayer:
         best_child = max(root_node.children, key=lambda child: child.N)
         return best_child.state.last_move
 
-    def best_move(self, initial_state, iterations):
-        root = PUCTNode(initial_state)
+    def add_dirichlet_noise(self, probs, legal_moves, alpha=0.03, epsilon=0.25):
+        """Add Dirichlet noise to the policy probabilities at the root node.
         
+        Args:
+            probs: Original policy probabilities for all moves
+            legal_moves: List of legal moves
+            alpha: Dirichlet noise parameter (smaller values = more concentrated)
+            epsilon: Weight of noise (0 = no noise, 1 = only noise)
+        """
+        # Create noise array of same size as probs
+        noise = np.zeros_like(probs)
+        
+        # Generate Dirichlet noise only for legal moves
+        legal_noise = np.random.dirichlet([alpha] * len(legal_moves))
+        
+        # Place noise only in legal move positions
+        for i, move in enumerate(legal_moves):
+            idx = move[0] * BOARD_SIZE + move[1]
+            noise[idx] = legal_noise[i]
+            
+        # Mix noise with original probabilities
+        noisy_probs = (1 - epsilon) * probs + epsilon * noise
+        
+        # Renormalize to ensure sum = 1
+        if np.sum(noisy_probs) > 0:
+            noisy_probs = noisy_probs / np.sum(noisy_probs)
+            
+        return noisy_probs
+
+    def best_move(self, initial_state, iterations, is_training=False):
+        root = PUCTNode(initial_state)
+      
         for _ in range(iterations):
-            # 1. Selection: Traverse the tree using UCT until reaching a leaf node.
+            # 1. Selection: Traverse the tree using UCT until reaching a leaf node
             node = self.select(root)
-            # 2. Expansion: Add a new child node by exploring an unvisited move.
+            
+            # 2. Expansion and Evaluation
             if not node.state.is_game_over():
-                policy, value = self.model.predict(node.state)  
-                if node.Q == 0:
+                # Get policy and value from neural network
+                curr_policy, value = self.model.predict(node.state)
+                
+                # Convert policy to numpy if it's a tensor
+                if isinstance(curr_policy, torch.Tensor):
+                    curr_policy = curr_policy.squeeze().detach().cpu().numpy()
+                else:
+                    curr_policy = curr_policy.squeeze()
+                
+                # Add Dirichlet noise during training (but this is not the AlphaZero way!)
+                if is_training and node == root:
+                    legal_moves = node.state.legal_moves()
+                    curr_policy = self.add_dirichlet_noise(curr_policy, legal_moves)
+                    curr_policy = torch.from_numpy(curr_policy).float().to(self.device)
+                
+                if node.Q == 0:  # Only set value if not already set
                     node.Q = value
-                node = self.expand(node, policy)
-
-                if root.acting_player != value:
+                
+                node = self.expand(node, curr_policy)
+                
+                # Flip value if needed based on player perspective
+                if root.acting_player != node.acting_player:
                     value = -value
-
+                    
+                # 3. Backpropagation
                 self.back_propagate(node, value)
-
+        
         # Return the best child node (without exploration weight)
         return self.choose_best_move(root)
 
@@ -151,45 +200,45 @@ class PUCTPlayer:
         
         return total_loss.item(), policy_loss.item(), value_loss.item()
 
-    def plot_training_loss(self, losses, save_path='plots/training_loss.png'):
-        """Plot and save the training loss graph."""
-        # Ensure the plots directory exists
-        import os
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        
+    def plot_training_loss(self, losses):
+        """Plot the training loss history"""
         plt.figure(figsize=(10, 6))
         plt.plot(losses, label='Training Loss')
-        plt.title('Training Loss Over Time')
-        plt.xlabel('Training Steps')
+        plt.xlabel('Episode')
         plt.ylabel('Loss')
+        plt.title('Training Loss Over Time')
         plt.grid(True)
         plt.legend()
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')  # Higher DPI for better quality
+
+        # Create plots directory if it doesn't exist
+        os.makedirs('plots', exist_ok=True)
+
+        # Save the plot
+        save_path = os.path.join('plots', 'training_loss.png')
+        plt.savefig(save_path)
         plt.close()
-        
         print(f"Loss plot saved to: {os.path.abspath(save_path)}")
 
     def train(self, num_episodes=1000, batch_size=32, learning_rate=0.001):
-        """Train the model through self-play
-        
-        Args:
-            num_episodes: Number of games to play
-            batch_size: Number of game states to train on at once
-            learning_rate: Learning rate for optimizer
-        """
+        """Train the model through self-play"""
+        self.model.train()  # Set model to training mode
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=0.5, patience=5)
         best_loss = float('inf')
         no_improvement_count = 0
-        patience = 200  # Number of episodes to wait before early stopping
+        patience = 100  # Number of episodes to wait before early stopping
+        
+        # Keep track of loss history
+        loss_history = []
         
         print(f"Starting training for {num_episodes} episodes...")
-        print(f"Batch size: {batch_size}, Learning rate: {learning_rate}")
+        print(f"Batch size: {batch_size}, Initial learning rate: {learning_rate}")
         print(f"Using device: {self.device}")
         
         for episode in range(num_episodes):
             epoch_start_time = time.time()
-            # Initialize new game
-            game = Gomoku(board_size=BOARD_SIZE)
+            game = Gomoku(BOARD_SIZE)
             game_states = []
             total_loss = 0
             num_batches = 0
@@ -199,27 +248,28 @@ class PUCTPlayer:
                 # Store current game state
                 game_states.append(game.clone())
                 
-                # Get move from MCTS
-                move = self.best_move(game, 100)
+                # Get move from MCTS with Dirichlet noise
+                move = self.best_move(game, 200, is_training=True)  # Increased MCTS iterations
                 game.make_move(move)
                 
                 # Train on a batch of states if we have enough
                 if len(game_states) >= batch_size:
                     batch_loss = 0
                     for state in game_states[-batch_size:]:
-                        loss, _, _ = self.train_step(state, optimizer)
+                        loss, policy_loss, value_loss = self.train_step(state, optimizer)
                         batch_loss += loss
                     avg_batch_loss = batch_loss / batch_size
                     total_loss += avg_batch_loss
                     num_batches += 1
+                    game_states = []  # Clear buffer after training
             
             # Train on remaining states at end of game
             if game_states:
-                remaining = len(game_states) % batch_size
+                remaining = len(game_states)
                 if remaining > 0:
                     batch_loss = 0
-                    for state in game_states[-remaining:]:
-                        loss, _, _ = self.train_step(state, optimizer)
+                    for state in game_states:
+                        loss, policy_loss, value_loss = self.train_step(state, optimizer)
                         batch_loss += loss
                     avg_batch_loss = batch_loss / remaining
                     total_loss += avg_batch_loss
@@ -227,12 +277,12 @@ class PUCTPlayer:
             
             # Calculate average loss for this episode
             avg_episode_loss = total_loss / num_batches if num_batches > 0 else float('inf')
+            loss_history.append(avg_episode_loss)
             
-            # Log progress
-            if episode % 10 == 0:
-                print(f"Episode {episode}, Average Loss: {avg_episode_loss:.4f}")
+            # Update learning rate based on loss
+            scheduler.step(avg_episode_loss)
             
-            # Save best model if we have a new best loss
+            # Early stopping check
             if avg_episode_loss < best_loss:
                 best_loss = avg_episode_loss
                 self.model.save_model('models/best_gomoku_model.pt')
@@ -240,10 +290,18 @@ class PUCTPlayer:
                 no_improvement_count = 0
             else:
                 no_improvement_count += 1
-
+                
+            if no_improvement_count >= patience:
+                print(f"Early stopping triggered after {episode} episodes")
+                break
+            
+            # Log progress
+            if episode % 10 == 0:
+                current_lr = scheduler.get_last_lr()[-1]
+                print(f"Episode {episode}, Average Loss: {avg_episode_loss:.4f}, LR: {current_lr:.6f}")
+            
             epoch_end_time = time.time()
             epoch_duration = epoch_end_time - epoch_start_time
-            print(f"Episode {episode + 1}/{num_episodes}, Loss: {total_loss:.4f}, Time: {epoch_duration:.2f}s")
             
             # Regular checkpoint save
             if episode % 100 == 0:
@@ -251,8 +309,8 @@ class PUCTPlayer:
             
             # Plot loss every 10 episodes
             if episode % 10 == 0:
-                self.plot_training_loss([avg_episode_loss for _ in range(episode+1)])
-
+                self.plot_training_loss(loss_history)
+        
         print("Training completed!")
         print(f"Best model saved with loss: {best_loss:.4f}")
         

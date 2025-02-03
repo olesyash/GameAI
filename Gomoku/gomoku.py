@@ -167,9 +167,9 @@ class Gomoku:
         """Get the current player.
         
         Returns:
-            int: Current player (1 for black, 2 for white)
+            int: Current player (1 for black, -1 for white)
         """
-        return self.next_player
+        return 0 - self.next_player
 
     def is_game_over(self):
         """Check if the game is over.
@@ -213,8 +213,14 @@ class Gomoku:
         Returns:
             dict: Contains board tensor, policy probabilities, and game state
         """
-        # Convert board to tensor format
-        board_tensor = torch.FloatTensor(self.board).view(1, 1, self.board_size, self.board_size)
+        # Create a 2-channel tensor: [board_state, current_player]
+        board_tensor = torch.zeros(1, 2, self.board_size, self.board_size)
+        
+        # Channel 1: Board state
+        board_tensor[0, 0] = torch.FloatTensor(self.board)
+        
+        # Channel 2: Current player (fill with 1 if black, -1 if white)
+        board_tensor[0, 1].fill_(self.get_current_player())
         
         # Create policy probabilities (uniform over legal moves)
         policy_probs = np.zeros(self.board_size * self.board_size)
@@ -240,7 +246,6 @@ class Gomoku:
         encoded_game[STATUS] = status_tensor
         encoded_game[IS_ONGOING] = game_status == ONGOING  # Add flag for game state
         encoded_game[VALUE] = training_value
-        encoded_game[CURRENT_PLAYER] = self.next_player
         
         return encoded_game
 

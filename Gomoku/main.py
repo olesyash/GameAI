@@ -9,7 +9,7 @@ def train_model():
     player = PUCTPlayer(exploration_weight=1.0, game=game)
     
     # Training settings
-    num_episodes = 10000
+    num_episodes = 100
     batch_size = 32
     learning_rate = 0.001
     
