@@ -122,7 +122,7 @@ class PUCTPlayer:
         
         # Create noise array of same size as probs
         noise = np.zeros_like(probs)
-        move_indices = [move[0] * BOARD_SIZE + move[1] for move in legal_moves]
+        move_indices = [move[0] * self.model.board_size + move[1] for move in legal_moves]
         legal_noise = np.random.dirichlet([alpha] * len(legal_moves))
         noise[move_indices] = legal_noise
         
@@ -197,7 +197,7 @@ class PUCTPlayer:
             game: Current game state
             root_node: Root node from MCTS search in best_move
             optimizer: PyTorch optimizer
-        
+            
         Returns:
             tuple: (total_loss, policy_loss, value_loss)
         """
@@ -205,7 +205,7 @@ class PUCTPlayer:
         board_size = game.board_size
         target_policy = torch.zeros(board_size * board_size)
         total_visits = sum(child.N for child in root_node.children)
-        
+
         # Convert visit counts to probabilities
         for child in root_node.children:
             move = child.state.last_move
@@ -237,40 +237,20 @@ class PUCTPlayer:
         
         return total_loss.item(), policy_loss.item(), value_loss.item()
 
-    def plot_training_loss(self, losses):
-        """Plot the training loss history"""
-        plt.figure(figsize=(10, 6))
-        plt.plot(losses, label='Training Loss')
-        plt.xlabel('Episode')
-        plt.ylabel('Loss')
-        plt.title('Training Loss Over Time')
-        plt.grid(True)
-        plt.legend()
-
-        # Create plots directory if it doesn't exist
-        os.makedirs('plots', exist_ok=True)
-
-        # Save the plot
-        save_path = os.path.join('plots', 'training_loss.png')
-        plt.savefig(save_path)
-        plt.close()
-        print(f"Loss plot saved to: {os.path.abspath(save_path)}")
-
-    def train(self, num_games=100, learning_rate=0.001):
+    def train(self, num_games=1000, learning_rate=0.001):
         """Train the neural network through self-play.
         
         Args:
-            num_games (int): Number of self-play games to generate
-            batch_size (int): Size of training batches
+            num_games: Number of self-play games to generate
+            learning_rate: Initial learning rate
         """
-        self.model.train()  # Set model to training mode
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.5, patience=5)
+        self.model.train()
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate, weight_decay=1e-4)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
         
         best_loss = float('inf')
         no_improvement_count = 0
-        patience = 100  # Number of games to wait before early stopping
+        patience = 50  # Number of games to wait before early stopping
         loss_history = []
         
         print(f"Starting training for {num_games} games...")
@@ -284,17 +264,18 @@ class PUCTPlayer:
             # Play a complete game
             while not game.is_game_over():
                 # Get move with Dirichlet noise and save root node
-                last_root_node = self.best_move(game, 200, is_training=True)[1]
+                last_root_node = self.best_move(game, 400, is_training=True)[1]
                 move = self.choose_best_move(last_root_node).last_move
                 game.make_move(move)
             
-            # Train only on the final game state if there's a winner
-            if game.get_winner() is not None and last_root_node is not None:
+            # Train on the final game state if there's a winner
+            winner = game.get_winner()
+            if winner is not None and last_root_node is not None:
                 loss, policy_loss, value_loss = self.train_step(game, last_root_node, optimizer)
+                loss_history.append(loss)
                 
                 # Update learning rate based on loss
                 scheduler.step(loss)
-                loss_history.append(loss)
                 
                 # Early stopping check
                 if loss < best_loss:
@@ -314,8 +295,8 @@ class PUCTPlayer:
                 self.model.save_model(f'models/gomoku_model_checkpoint_{game_idx}.pt')
             
             # Plot loss and log progress every 10 games
-            if game_idx % 10 == 0:
-                current_lr = scheduler.get_last_lr()[-1]
+            if game_idx % 10 == 0 and loss_history:
+                current_lr = optimizer.param_groups[0]['lr']
                 print(f"Game {game_idx}, Loss: {loss:.4f}, LR: {current_lr:.6f}")
                 self.plot_training_loss(loss_history)
             
@@ -329,6 +310,25 @@ class PUCTPlayer:
         # Load the best model for future use
         self.model.load_model('models/best_gomoku_model.pt')
         self.model.eval()
+
+    def plot_training_loss(self, losses):
+        """Plot the training loss history"""
+        plt.figure(figsize=(10, 6))
+        plt.plot(losses, label='Training Loss')
+        plt.xlabel('Episode')
+        plt.ylabel('Loss')
+        plt.title('Training Loss Over Time')
+        plt.grid(True)
+        plt.legend()
+
+        # Create plots directory if it doesn't exist
+        os.makedirs('plots', exist_ok=True)
+
+        # Save the plot
+        save_path = os.path.join('plots', 'training_loss.png')
+        plt.savefig(save_path)
+        plt.close()
+        print(f"Loss plot saved to: {os.path.abspath(save_path)}")
 
     def play_game(self, opponent=None):
         """Play a single game against an opponent or self

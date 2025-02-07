@@ -11,38 +11,48 @@ class GameNetwork(nn.Module):
         self.board_size = board_size
         self.device = device
         
-        # Convolutional layers
-        self.conv1 = nn.Conv2d(2, 64, kernel_size=3, padding=1)  # 2 input channels
-        self.bn1 = nn.BatchNorm2d(64)
-        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm2d(128)
-        self.conv3 = nn.Conv2d(128, 256, kernel_size=3, padding=1)
-        self.bn3 = nn.BatchNorm2d(256)
+        # Initial convolution layer
+        self.conv_input = nn.Conv2d(2, 256, kernel_size=3, padding=1)
+        self.bn_input = nn.BatchNorm2d(256)
         
-        # Policy head
+        # Residual layers
+        self.num_residual = 10
+        self.residual_layers = nn.ModuleList([
+            nn.ModuleDict({
+                'conv1': nn.Conv2d(256, 256, kernel_size=3, padding=1),
+                'bn1': nn.BatchNorm2d(256),
+                'conv2': nn.Conv2d(256, 256, kernel_size=3, padding=1),
+                'bn2': nn.BatchNorm2d(256)
+            }) for _ in range(self.num_residual)
+        ])
+        
+        # Policy head - predicting move probabilities
         self.policy_conv = nn.Conv2d(256, 32, kernel_size=1)
         self.policy_bn = nn.BatchNorm2d(32)
         self.policy_fc = nn.Linear(32 * board_size * board_size, board_size * board_size)
         
-        # Value head
+        # Value head - predicting game outcome
         self.value_conv = nn.Conv2d(256, 32, kernel_size=1)
         self.value_bn = nn.BatchNorm2d(32)
         self.value_fc1 = nn.Linear(32 * board_size * board_size, 256)
         self.value_fc2 = nn.Linear(256, 1)
         
-        # Dropout for regularization
-        self.dropout = nn.Dropout(0.3)
-        
-        # Initialize weights
+        self._initialize_weights()
+    
+    def _initialize_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
+                # He initialization for ReLU
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
             elif isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
             elif isinstance(m, nn.Linear):
-                nn.init.xavier_normal_(m.weight)
-                nn.init.constant_(m.bias, 0)
+                # He initialization for the linear layers
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                nn.init.zeros_(m.bias)
 
     def forward(self, x):
         """Forward pass through the network.
@@ -58,32 +68,34 @@ class GameNetwork(nn.Module):
         
         # Add batch dimension if input is 3D
         if len(x.shape) == 3:
-            x = x.unsqueeze(0)  # Add batch dimension [1, 2, board_size, board_size]
+            x = x.unsqueeze(0)
         
-        # Shared convolutional layers
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = F.relu(self.bn2(self.conv2(x)))
-        x = F.relu(self.bn3(self.conv3(x)))
+        # Initial convolution block
+        x = F.relu(self.bn_input(self.conv_input(x)))
+        
+        # Residual blocks
+        for layer in self.residual_layers:
+            identity = x
+            out = F.relu(layer['bn1'](layer['conv1'](x)))
+            out = layer['bn2'](layer['conv2'](out))
+            x = F.relu(out + identity)  # Skip connection
         
         # Policy head
         policy = F.relu(self.policy_bn(self.policy_conv(x)))
-        policy = policy.view(x.size(0), -1)  # Flatten while preserving batch dimension
-        policy = self.dropout(policy)
+        policy = policy.view(x.size(0), -1)
         policy = self.policy_fc(policy)
         policy = F.softmax(policy, dim=1)
         
         # Value head
         value = F.relu(self.value_bn(self.value_conv(x)))
-        value = value.view(x.size(0), -1)  # Flatten while preserving batch dimension
-        value = self.dropout(value)
+        value = value.view(x.size(0), -1)
         value = F.relu(self.value_fc1(value))
-        value = self.dropout(value)
         value = torch.tanh(self.value_fc2(value))
         
-        # If we added a batch dimension, remove it from the outputs
+        # Remove batch dimension if it was added
         if len(x.shape) == 4 and x.size(0) == 1:
-            policy = policy.squeeze(0)  # Shape: [board_size * board_size]
-            value = value.squeeze(0)    # Shape: [1]
+            policy = policy.squeeze(0)
+            value = value.squeeze(0)
         
         return policy, value
 
