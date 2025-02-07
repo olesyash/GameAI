@@ -101,7 +101,7 @@ class PUCTPlayer:
 
     def choose_best_move(self, root_node):
         best_child = max(root_node.children, key=lambda child: child.N)
-        return best_child.state.last_move
+        return best_child.state
 
     def add_dirichlet_noise(self, probs, legal_moves, alpha=0.03, epsilon=0.25):
         """Add Dirichlet noise to the policy probabilities at the root node.
@@ -111,7 +111,15 @@ class PUCTPlayer:
             legal_moves: List of legal moves
             alpha: Dirichlet noise parameter (smaller values = more concentrated)
             epsilon: Weight of noise (0 = no noise, 1 = only noise)
+            
+        Returns:
+            1D numpy array with noisy probabilities
         """
+        # Ensure probs is a 1D numpy array
+        if isinstance(probs, torch.Tensor):
+            probs = probs.cpu().numpy()
+        probs = np.asarray(probs).flatten()
+        
         # Create noise array of same size as probs
         noise = np.zeros_like(probs)
         move_indices = [move[0] * BOARD_SIZE + move[1] for move in legal_moves]
@@ -174,23 +182,43 @@ class PUCTPlayer:
                 # 3. Backpropagation
                 self.back_propagate(node, value)
         
-        # Return the best child node (without exploration weight)
-        return self.choose_best_move(root)
+        # Return move based on visit count distribution during training, or best move during evaluation
+        if is_training:
+            visit_counts = np.array([child.N for child in root.children])
+            probs = visit_counts / visit_counts.sum()  # normalize to get probabilities
+            chosen_child = np.random.choice(root.children, p=probs)
+            return chosen_child.state.last_move, root
+        return self.choose_best_move(root), root
 
-    def train_step(self, game, optimizer):
+    def train_step(self, game, root_node, optimizer):
         """Train the neural network using MCTS visit counts and game outcome
         
         Args:
             game: Current game state
+            root_node: Root node from MCTS search in best_move
             optimizer: PyTorch optimizer
         
         Returns:
             tuple: (total_loss, policy_loss, value_loss)
         """
-        encoded_game = game.encode()
-        board_tensor = encoded_game[BOARD_TENSOR].to(self.device)
-        target_policy = encoded_game[POLICY_PROBS].to(self.device)
-        target_value = encoded_game[STATUS].to(self.device)
+        # Create target policy from visit counts
+        board_size = game.board_size
+        target_policy = torch.zeros(board_size * board_size)
+        total_visits = sum(child.N for child in root_node.children)
+        
+        # Convert visit counts to probabilities
+        for child in root_node.children:
+            move = child.state.last_move
+            move_idx = move[0] * board_size + move[1]  # Convert 2D position to 1D index
+            target_policy[move_idx] = child.N / total_visits
+        
+        # Encode current game state
+        board_tensor = game.encode().to(self.device)
+        target_policy = target_policy.to(self.device)
+        
+        # Get game outcome for value target
+        winner = game.get_winner()
+        target_value = torch.tensor([1.0 if winner == game.get_current_player() else -1.0], device=self.device)
         
         # Forward pass
         optimizer.zero_grad()
@@ -200,7 +228,7 @@ class PUCTPlayer:
         policy_loss = -torch.sum(target_policy * torch.log(policy.view(-1) + 1e-8))  # Cross entropy
         value_loss = F.mse_loss(value, target_value)  # MSE loss
         
-        # L = Policy Loss + λ · Value Loss,
+        # L = Policy Loss + λ · Value Loss
         total_loss = policy_loss + self.value_weight * value_loss
         
         # Backward pass
@@ -228,103 +256,79 @@ class PUCTPlayer:
         plt.close()
         print(f"Loss plot saved to: {os.path.abspath(save_path)}")
 
-    def train(self, num_episodes=1000, batch_size=32, learning_rate=0.001):
-        """Train the model through self-play"""
+    def train(self, num_games=100, learning_rate=0.001):
+        """Train the neural network through self-play.
+        
+        Args:
+            num_games (int): Number of self-play games to generate
+            batch_size (int): Size of training batches
+        """
         self.model.train()  # Set model to training mode
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='min', factor=0.5, patience=5)
+        
         best_loss = float('inf')
         no_improvement_count = 0
-        patience = 100  # Number of episodes to wait before early stopping
-        
-        # Keep track of loss history
+        patience = 100  # Number of games to wait before early stopping
         loss_history = []
         
-        print(f"Starting training for {num_episodes} episodes...")
-        print(f"Batch size: {batch_size}, Initial learning rate: {learning_rate}")
+        print(f"Starting training for {num_games} games...")
         print(f"Using device: {self.device}")
         
-        for episode in range(num_episodes):
+        for game_idx in range(num_games):
             epoch_start_time = time.time()
             game = Gomoku(BOARD_SIZE)
-            game_states = []
-            total_loss = 0
-            num_batches = 0
+            last_root_node = None
             
-            # Play game until terminal state
+            # Play a complete game
             while not game.is_game_over():
-                # Store current game state
-                game_states.append(game.clone())
-                
-                # Get move from MCTS with Dirichlet noise
-                move = self.best_move(game, 200, is_training=True)  # Increased MCTS iterations
+                # Get move with Dirichlet noise and save root node
+                last_root_node = self.best_move(game, 200, is_training=True)[1]
+                move = self.choose_best_move(last_root_node).last_move
                 game.make_move(move)
+            
+            # Train only on the final game state if there's a winner
+            if game.get_winner() is not None and last_root_node is not None:
+                loss, policy_loss, value_loss = self.train_step(game, last_root_node, optimizer)
                 
-                # Train on a batch of states if we have enough
-                if len(game_states) >= batch_size:
-                    batch_loss = 0
-                    for state in game_states[-batch_size:]:
-                        loss, policy_loss, value_loss = self.train_step(state, optimizer)
-                        batch_loss += loss
-                    avg_batch_loss = batch_loss / batch_size
-                    total_loss += avg_batch_loss
-                    num_batches += 1
-                    game_states = []  # Clear buffer after training
-            
-            # Train on remaining states at end of game
-            if game_states:
-                remaining = len(game_states)
-                if remaining > 0:
-                    batch_loss = 0
-                    for state in game_states:
-                        loss, policy_loss, value_loss = self.train_step(state, optimizer)
-                        batch_loss += loss
-                    avg_batch_loss = batch_loss / remaining
-                    total_loss += avg_batch_loss
-                    num_batches += 1
-            
-            # Calculate average loss for this episode
-            avg_episode_loss = total_loss / num_batches if num_batches > 0 else float('inf')
-            loss_history.append(avg_episode_loss)
-            
-            # Update learning rate based on loss
-            scheduler.step(avg_episode_loss)
-            
-            # Early stopping check
-            if avg_episode_loss < best_loss:
-                best_loss = avg_episode_loss
-                self.model.save_model('models/best_gomoku_model.pt')
-                print(f"Episode {episode}: New best model saved with loss {best_loss:.4f}")
-                no_improvement_count = 0
-            else:
-                no_improvement_count += 1
+                # Update learning rate based on loss
+                scheduler.step(loss)
+                loss_history.append(loss)
                 
-            if no_improvement_count >= patience:
-                print(f"Early stopping triggered after {episode} episodes")
-                break
+                # Early stopping check
+                if loss < best_loss:
+                    best_loss = loss
+                    self.model.save_model('models/best_gomoku_model.pt')
+                    print(f"Game {game_idx}: New best model saved with loss {best_loss:.4f}")
+                    no_improvement_count = 0
+                else:
+                    no_improvement_count += 1
+                
+                if no_improvement_count >= patience:
+                    print(f"Early stopping triggered after {game_idx} games")
+                    break
             
-            # Log progress
-            if episode % 10 == 0:
+            # Regular checkpoint save
+            if game_idx % 100 == 0:
+                self.model.save_model(f'models/gomoku_model_checkpoint_{game_idx}.pt')
+            
+            # Plot loss and log progress every 10 games
+            if game_idx % 10 == 0:
                 current_lr = scheduler.get_last_lr()[-1]
-                print(f"Episode {episode}, Average Loss: {avg_episode_loss:.4f}, LR: {current_lr:.6f}")
+                print(f"Game {game_idx}, Loss: {loss:.4f}, LR: {current_lr:.6f}")
+                self.plot_training_loss(loss_history)
             
             epoch_end_time = time.time()
             epoch_duration = epoch_end_time - epoch_start_time
-            
-            # Regular checkpoint save
-            if episode % 100 == 0:
-                self.model.save_model(f'models/gomoku_model_checkpoint_{episode}.pt')
-            
-            # Plot loss every 10 episodes
-            if episode % 10 == 0:
-                self.plot_training_loss(loss_history)
+            print(f"Game {game_idx} completed in {epoch_duration:.2f} seconds")
         
         print("Training completed!")
         print(f"Best model saved with loss: {best_loss:.4f}")
         
         # Load the best model for future use
-        self.model.load_model('models/best_gomoku_model.pt')
+        self.model.load('models/best_gomoku_model.pt')
+        self.model.eval()
 
     def play_game(self, opponent=None):
         """Play a single game against an opponent or self
@@ -340,9 +344,11 @@ class PUCTPlayer:
         
         while not game.is_game_over():
             if game.next_player == 1 or opponent is None:
-                move = self.best_move(game, 100)
+                state, _ = self.best_move(game, 100)
+                move = state.last_move
             else:
-                move = opponent.best_move(game, 100)
+                state, _ = opponent.best_move(game, 100)
+                move = state.last_move
             game.make_move(move)
         
         return game, game.get_winner()

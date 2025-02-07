@@ -210,47 +210,28 @@ class Gomoku:
         """Encode the game state for neural network input.
         
         Returns:
-            dict: Encoded game state with the following keys:
-                - BOARD_TENSOR: Board state tensor
-                - POLICY_PROBS: Policy probabilities
-                - STATUS: Game status
-                - IS_ONGOING: Whether game is ongoing
-                - VALUE: Game value for training
+            torch.Tensor: Two-channel tensor representing the board state:
+                - Channel 1: Current player's moves (1 where current player has moved, 0 elsewhere)
+                - Channel 2: Opponent's moves (1 where opponent has moved, 0 elsewhere)
         """
-        encoded_game = {}
+        current_player = self.get_current_player()
+        board_size = len(self.board)
         
-        # Create board tensor (board state + current player)
-        board_flat = torch.FloatTensor(self.board).view(-1)  # Flatten the board
-        current_player = torch.FloatTensor([self.get_current_player()])  # Single value for player
-        board_tensor = torch.cat([board_flat, current_player])  # Concatenate
-        encoded_game[BOARD_TENSOR] = board_tensor.unsqueeze(0)  # Add batch dimension
+        # Create two empty channels
+        current_player_channel = torch.zeros((board_size, board_size))
+        opponent_channel = torch.zeros((board_size, board_size))
         
-        # Create policy probabilities (uniform over legal moves)
-        policy_probs = np.zeros(self.board_size * self.board_size)
-        legal_moves = self.legal_moves()
-        if legal_moves:
-            prob_per_move = 1.0 / len(legal_moves)
-            for move in legal_moves:
-                move_idx = move[0] * self.board_size + move[1]
-                policy_probs[move_idx] = prob_per_move
+        # Fill the channels based on the board state
+        for i in range(board_size):
+            for j in range(board_size):
+                if self.board[i][j] == current_player:
+                    current_player_channel[i][j] = 1
+                elif self.board[i][j] != 0:  # If it's not empty and not current player, it's opponent
+                    opponent_channel[i][j] = 1
         
-        # Convert to tensors with correct shapes
-        policy_probs = torch.FloatTensor(policy_probs)
-        
-        # Store both the game status and the value for training
-        game_status = self.status  # Keep original status (-17 for ongoing)
-        training_value = self.status if self.status != ONGOING else 0  # Convert to 0 for training
-        
-        status_tensor = torch.FloatTensor([[training_value]])  # Shape: [1, 1]
-        
-        encoded_game = {}
-        encoded_game[BOARD_TENSOR] = board_tensor
-        encoded_game[POLICY_PROBS] = policy_probs
-        encoded_game[STATUS] = status_tensor
-        encoded_game[IS_ONGOING] = game_status == ONGOING  # Add flag for game state
-        encoded_game[VALUE] = training_value
-        
-        return encoded_game
+        # Stack the channels
+        board_tensor = torch.stack([current_player_channel, opponent_channel])
+        return board_tensor
 
     def decode(self, value):
         """ Decode the value from vector(-1, 1) to actual value 0,1,-1

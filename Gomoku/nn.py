@@ -3,103 +3,89 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 from gomoku import BOARD_SIZE, BOARD_TENSOR, POLICY_PROBS, STATUS
-
+import os
 
 class GameNetwork(nn.Module):
-    # def __init__(self,board_size):
-    #     super(GameNetwork, self).__init__()
-    #     self.board_size = board_size
-    #     pass
-    #     
-    #     self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
-    #     self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-    #     self.conv3 = nn.Conv2d(64, 256, kernel_size=3, padding=1)
-    #     
-    #     #policy head
-    #     self.policy_conv = nn.Conv2d(256, 32, kernel_size=1)
-    #     self.policy_fc = nn.Linear(32*board_size*board_size, board_size*board_size)
-    #     
-    #     #value head
-    #     self.value_conv = nn.Conv2d(256, 32, kernel_size=1)
-    #     self.value_fc1 = nn.Linear(32*board_size*board_size, 256)
-    #     self.value_fc2 = nn.Linear(256, 1)
-    #     
-    # def forward(self, x):
-    #     x = F.relu(self.conv1(x))
-    #     x = F.relu(self.conv2(x))
-    #     x = F.relu(self.conv3(x))
-    #     
-    #     #policy head
-    #     policy = self.policy_conv(x)
-    #     policy = policy.view(-1, 32*self.board_size*self.board_size)
-    #     policy = self.policy_fc(policy)
-    #     policy = F.log_softmax(policy, dim=1)
-    #     
-    #     #value head
-    #     value = self.value_conv(x)
-    #     value = value.view(-1, 32*self.board_size*self.board_size)
-    #     value = F.relu(self.value_fc1(value))
-    #     value = torch.tanh(self.value_fc2(value))
-    #     
-    #     return value, policy
-
     def __init__(self, board_size, device):
         super(GameNetwork, self).__init__()
         self.board_size = board_size
         self.device = device
         
-        # Input size is board_size^2 + 1 (flattened board + player value)
-        input_size = board_size * board_size + 1
-
-        # Shared layers
-        self.fc1 = nn.Linear(input_size, 256)
-        self.fc2 = nn.Linear(256, 512)
-        self.fc3 = nn.Linear(512, 256)
+        # Convolutional layers
+        self.conv1 = nn.Conv2d(2, 64, kernel_size=3, padding=1)  # 2 input channels
+        self.bn1 = nn.BatchNorm2d(64)
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(128)
+        self.conv3 = nn.Conv2d(128, 256, kernel_size=3, padding=1)
+        self.bn3 = nn.BatchNorm2d(256)
         
         # Policy head
-        self.policy_fc1 = nn.Linear(256, 256)
-        self.policy_out = nn.Linear(256, board_size * board_size)
+        self.policy_conv = nn.Conv2d(256, 32, kernel_size=1)
+        self.policy_bn = nn.BatchNorm2d(32)
+        self.policy_fc = nn.Linear(32 * board_size * board_size, board_size * board_size)
         
         # Value head
-        self.value_fc1 = nn.Linear(256, 128)
-        self.value_out = nn.Linear(128, 1)
+        self.value_conv = nn.Conv2d(256, 32, kernel_size=1)
+        self.value_bn = nn.BatchNorm2d(32)
+        self.value_fc1 = nn.Linear(32 * board_size * board_size, 256)
+        self.value_fc2 = nn.Linear(256, 1)
         
         # Dropout for regularization
         self.dropout = nn.Dropout(0.3)
         
         # Initialize weights
         for m in self.modules():
-            if isinstance(m, nn.Linear):
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
                 nn.init.xavier_normal_(m.weight)
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
-        # Input x is already flattened with player value appended
+        """Forward pass through the network.
         
-        # Ensure input tensor is on the same device as the model
-        x = x.to(next(self.parameters()).device)
+        Args:
+            x: Input tensor of shape [2, board_size, board_size] or [batch_size, 2, board_size, board_size]
+        Returns:
+            tuple: (policy, value)
+                - policy: tensor of shape [board_size * board_size] or [batch_size, board_size * board_size]
+                - value: tensor of shape [1] or [batch_size, 1]
+        """
+        x = x.to(self.device)
         
-        # Shared layers
-        x = F.relu(self.fc1(x))
-        x = self.dropout(x)
-        x = F.relu(self.fc2(x))
-        x = self.dropout(x)
-        x = F.relu(self.fc3(x))
-        x = self.dropout(x)
+        # Add batch dimension if input is 3D
+        if len(x.shape) == 3:
+            x = x.unsqueeze(0)  # Add batch dimension [1, 2, board_size, board_size]
+        
+        # Shared convolutional layers
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = F.relu(self.bn3(self.conv3(x)))
         
         # Policy head
-        policy = F.relu(self.policy_fc1(x))
+        policy = F.relu(self.policy_bn(self.policy_conv(x)))
+        policy = policy.view(x.size(0), -1)  # Flatten while preserving batch dimension
         policy = self.dropout(policy)
-        policy = self.policy_out(policy)
-        policy = F.softmax(policy, dim=0)  # Change to dim=0 since we have a single sample
+        policy = self.policy_fc(policy)
+        policy = F.softmax(policy, dim=1)
         
         # Value head
-        value = F.relu(self.value_fc1(x))
+        value = F.relu(self.value_bn(self.value_conv(x)))
+        value = value.view(x.size(0), -1)  # Flatten while preserving batch dimension
         value = self.dropout(value)
-        value = self.value_out(value)
-        value = torch.tanh(value)  # Ensure value is between -1 and 1
+        value = F.relu(self.value_fc1(value))
+        value = self.dropout(value)
+        value = torch.tanh(self.value_fc2(value))
         
-        return policy, value.view(-1, 1)  # Ensure value has shape [batch_size, 1]
+        # If we added a batch dimension, remove it from the outputs
+        if len(x.shape) == 4 and x.size(0) == 1:
+            policy = policy.squeeze(0)  # Shape: [board_size * board_size]
+            value = value.squeeze(0)    # Shape: [1]
+        
+        return policy, value
 
     def predict(self, state):
         """Get policy and value predictions for a game state
@@ -109,25 +95,34 @@ class GameNetwork(nn.Module):
             
         Returns:
             tuple: (policy, value)
-                - policy: numpy array of move probabilities
+                - policy: numpy array of shape [board_size * board_size]
                 - value: float value prediction (-1 to 1)
         """
         # Prepare state for neural network
-        encoded_game = state.encode()
-        board_tensor = encoded_game[BOARD_TENSOR].to(self.device)
+        board_tensor = state.encode().to(self.device)
         
+        # Add batch dimension if not present
+        if len(board_tensor.shape) == 3:  # [2, board_size, board_size]
+            board_tensor = board_tensor.unsqueeze(0)  # Add batch dimension
+            
         # Get policy and value predictions
         with torch.no_grad():
             policy, value = self.forward(board_tensor)
-            # Move tensors to CPU before converting to numpy
-            policy = policy.cpu().numpy()  # No need for view(-1) since it's already flat
-            value = value.cpu().item()
-        value = state.decode(value)
-        return policy, value  # Return in order expected by PUCT
+            # Ensure policy is 1D array of correct size
+            if isinstance(policy, torch.Tensor):
+                policy = policy.cpu().numpy()
+            if len(policy.shape) == 2:
+                policy = policy[0]  # Take first item from batch
+            # Ensure value is a scalar
+            if isinstance(value, torch.Tensor):
+                value = value.cpu().item()
+            if hasattr(value, 'shape') and len(value.shape) > 0:
+                value = value[0]
+        
+        return policy, value
 
     def save_model(self, path='models/gomoku_model.pt'):
-        """
-        Save model state to file
+        """Save model state to file
         
         Args:
             path: Path to save the model to
@@ -140,39 +135,21 @@ class GameNetwork(nn.Module):
         state = {
             'board_size': self.board_size,
             'state_dict': self.state_dict(),
-            'model_version': '1.0'  # Useful for future compatibility
+            'model_version': '2.0'  # Updated version for CNN architecture
         }
         torch.save(state, path)
-        print(f"Model saved to {path}")
-
+    
     def load_model(self, path='models/gomoku_model.pt'):
-        """
-        Load model state from file
+        """Load model state from file
         
         Args:
             path: Path to load the model from
-            
-        Returns:
-            bool: True if model was loaded successfully, False otherwise
         """
-        try:
-            # Load model state
-            state = torch.load(path)
-            
-            # Verify board size matches
+        if os.path.exists(path):
+            state = torch.load(path, map_location=self.device)
             if state['board_size'] != self.board_size:
-                print(f"Warning: Saved model board size ({state['board_size']}) "
-                      f"doesn't match current board size ({self.board_size})")
-                return False
-            
-            # Load state dict
+                raise ValueError(f"Model board size ({state['board_size']}) does not match current board size ({self.board_size})")
             self.load_state_dict(state['state_dict'])
-            print(f"Model loaded from {path}")
-            return True
-            
-        except FileNotFoundError:
+            print(f"Loaded model version {state.get('model_version', '1.0')} from {path}")
+        else:
             print(f"No saved model found at {path}")
-            return False
-        except Exception as e:
-            print(f"Error loading model: {str(e)}")
-            return False

@@ -15,8 +15,7 @@ def train_model():
     
     # Start training
     print("Starting training...")
-    player.train(num_episodes=num_episodes, 
-                 batch_size=batch_size,
+    player.train(num_games=num_episodes,
                  learning_rate=learning_rate)
     
     return player
