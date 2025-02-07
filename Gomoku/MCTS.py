@@ -8,23 +8,10 @@ import numpy as np
 class MCTSPlayer:
     def __init__(self, exploration_weight=2):
         self.exploration_weight = exploration_weight
-        self.state_dict = {}  # Dictionary to store states
-
-    def get_state_hash(self, state):
-        """Create a unique hash for a game state."""
-        return hash(state.board.tobytes())
-
-    def get_or_create_node(self, state, parent=None):
-        """Get existing node from dictionary or create a new one."""
-        state_hash = self.get_state_hash(state)
-        if state_hash not in self.state_dict:
-            self.state_dict[state_hash] = MCTSNode(state, parent)
-        return self.state_dict[state_hash]
 
     def search(self, initial_state, iterations=1000):
         """Performs MCTS to find the best move."""
-        self.state_dict.clear()  # Clear the state dictionary for new search
-        root = self.get_or_create_node(initial_state)
+        root = MCTSNode(initial_state)
 
         for _ in range(iterations):
             # 1. Selection: Traverse the tree using UCT until reaching a leaf node.
@@ -45,44 +32,25 @@ class MCTSPlayer:
         self.print_tree(root)
         
         # Return the best child node (without exploration weight).
-        
         return root.best_child(exploration_weight=0)
-
+        
     def select(self, node):
-        """Selection phase: Navigate the tree using UCT until reaching a leaf node."""
-        current = node
-        while not current.state.is_game_over():
-            if not current.children:  # If node has no children yet
-                return current
-            if not current.is_fully_expanded():
-                return current
-            current = current.best_child(self.exploration_weight)
-        return current
+        """Selection phase: Navigate the tree using UCT."""
+        while not node.state.is_game_over() and node.is_fully_expanded():
+            node = node.best_child(self.exploration_weight)
+        return node
 
     def expand(self, node):
-        """Expansion phase: Add a new child node by exploring an unvisited move."""
-        if node.state.is_game_over():
-            return node
-
+        """Expansion phase: Add a new child node for an unvisited move."""
         possible_moves = node.state.legal_moves()
-        if not possible_moves:  # No legal moves available
-            return node
-            
-        # Get moves not yet expanded
-        expanded_moves = {child.state.last_move for child in node.children}
-        unexpanded_moves = [move for move in possible_moves if move not in expanded_moves]
-        
-        if not unexpanded_moves:  # All moves are expanded
-            return node.best_child(self.exploration_weight)
-            
-        # Choose a random unexpanded move
-        move = random.choice(unexpanded_moves)
-        new_state = node.state.clone()
-        new_state.make_move(move)
-        
-        child_node = self.get_or_create_node(new_state, parent=node)
-        node.children.append(child_node)
-        return child_node
+        for move in possible_moves:
+            if move not in [child.state.last_move for child in node.children]:
+                new_state = node.state.clone()
+                new_state.make_move(move)
+                child_node = MCTSNode(new_state, parent=node)
+                node.children.append(child_node)
+                return child_node
+        raise Exception("No moves to expand")
 
     def simulate(self, node):
         """Simulation phase: Play out the game with a mix of heuristic and random moves."""
@@ -91,14 +59,14 @@ class MCTSPlayer:
         while not current_state.is_game_over():
             moves = current_state.legal_moves()
             
-            # Check for winning moves (for either player)
+            # Check for winning moves
             for move in moves:
                 test_state = current_state.clone()
                 test_state.make_move(move)
                 if test_state.is_game_over():
                     current_state.make_move(move)
-                    continue
-            
+                    break  # Just break, not continue
+                    
             # If no winning moves, make a weighted random move
             if not current_state.is_game_over():
                 weights = []
@@ -124,9 +92,8 @@ class MCTSPlayer:
         """Backpropagate values through the tree"""
         while node is not None:
             node.visits += 1
-            # Simple moving average update
-            node.value += (reward - node.value) / node.visits
-            reward = -reward  # Switch reward for parent
+            node.value += reward
+            reward = -reward
             node = node.parent
 
     def print_tree(self, node, depth=0, max_depth=2):
@@ -136,22 +103,14 @@ class MCTSPlayer:
 
         indent = "  " * depth
         move_str = f"Move: {node.state.last_move}" if node.state.last_move else "Root"
-        uct = 0
-        if node.parent and node.visits > 0:
-            exploration = self.exploration_weight * math.sqrt(math.log(node.parent.visits) / node.visits)
-            exploitation = node.value / node.visits
-            uct = exploitation + exploration
-
+        
         print(f"{indent}{move_str} [Player: {node.acting_player}, "
-              f"Visits: {node.visits}, Value: {node.value:.2f}, "
-              f"UCT: {uct:.2f}]")
+              f"Visits: {node.visits}, Value: {node.value:.2f}]")
 
-        # Sort children by UCT value for better visualization
+        # Sort children by visits for better visualization
         if node.children:
             sorted_children = sorted(node.children, 
-                                  key=lambda n: n.value/n.visits + 
-                                  self.exploration_weight * math.sqrt(math.log(node.visits)/n.visits) 
-                                  if n.visits > 0 else float('inf'),
+                                  key=lambda n: n.visits,
                                   reverse=True)
             for child in sorted_children[:3]:  # Show top 3 children
                 self.print_tree(child, depth + 1, max_depth)
@@ -170,35 +129,54 @@ class MCTSNode:
 
     def is_fully_expanded(self):
         """Checks if all possible moves have been expanded."""
-        if not self.state.legal_moves():
-            return True
         return len(self.children) == len(self.state.legal_moves())
 
-    def best_child(self, exploration_weight=2):
-        """Select node with best UCT value.
-        Returns:
-            Node: Best child.
-        """
+    def get_value(self, exploration_weight):
+        """Calculate UCT value for node selection."""
         if self.visits == 0:
-            # we prioritize nodes that are not explored
-            return float('-inf') if exploration_weight == 0 else float('inf')
-        best_uct = -np.inf
-        best_node = None
-        for child in self.children:
-            uct = (child.value / child.visits) + exploration_weight * np.sqrt(np.log(self.visits) / child.visits)
-            if uct > best_uct:
-                best_uct = uct
-                best_node = child
-        # Avoid error if node has no children
-        if best_node is None:
+            return float('inf') if exploration_weight > 0 else float('-inf')
+            
+        if not self.parent:  # Root node
+            return self.value / self.visits if self.visits > 0 else 0
+            
+        # Standard UCT formula
+        exploitation = self.value / self.visits
+        parent_visits = max(1, self.parent.visits)  # Avoid log(0)
+        exploration = exploration_weight * math.sqrt(math.log(parent_visits) / self.visits)
+        return exploitation + exploration
+
+    def best_child(self, exploration_weight=2):
+        """Select node with best UCT value."""
+        if not self.children:
+            return self  # Return self if no children
+            
+        # Get all valid children
+        valid_children = [c for c in self.children if c is not None]
+        if not valid_children:
             return self
-        return best_node
+            
+        # Get max UCT value
+        max_value = float('-inf')
+        best_nodes = []
+        
+        for child in valid_children:
+            value = child.get_value(exploration_weight)
+            if value > max_value:
+                max_value = value
+                best_nodes = [child]
+            elif value == max_value:
+                best_nodes.append(child)
+                
+        # Among nodes with equal UCT, choose one with most visits
+        return max(best_nodes, key=lambda n: n.visits)
 
     def get_reward(self, state):
         """Returns the reward for the current game state relative to player"""
         if state.status == self.acting_player:
-            return 1
-        elif state.status == 0:  # Draw
-            return 0
+            return 1.0  # Win
+        elif state.status == -self.acting_player:
+            return -1.0  # Loss
+        elif state.status == 0 and not state.legal_moves():
+            return 0.0  # Draw
         else:
-            return -1
+            return 0.0  # Game not finished
