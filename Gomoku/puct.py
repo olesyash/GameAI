@@ -327,7 +327,7 @@ class PUCTPlayer:
         print(f"Best model saved with loss: {best_loss:.4f}")
         
         # Load the best model for future use
-        self.model.load('models/best_gomoku_model.pt')
+        self.model.load_model('models/best_gomoku_model.pt')
         self.model.eval()
 
     def play_game(self, opponent=None):
