@@ -6,6 +6,7 @@ from gomoku import BOARD_SIZE, Gomoku
 import matplotlib.pyplot as plt
 import os
 from MCTS import MCTSPlayer
+import time
 
 
 def train_model():
@@ -15,11 +16,12 @@ def train_model():
     
     network = GameNetwork(BOARD_SIZE, device)
     network.to(device)  # Ensure the model is on the correct device
+    network.load_model("models/model_latest.pt")
     
     # Training parameters
     exploration_weight = 1.0
     learning_rate = 0.001
-    num_episodes = 1
+    num_episodes = 100
     losses = []
     
     # Store all training data
@@ -28,6 +30,8 @@ def train_model():
     all_values = []
     
     for episode in range(num_episodes):
+        start_time = time.time()
+        
         game = Gomoku(board_size=BOARD_SIZE)
         states_this_game = []  # Store all states in this game
         policies_this_game = []  # Store MCTS policies for each state
@@ -111,6 +115,9 @@ def train_model():
             network.save_model(f"models/model_iter_{episode+1}.pt")
             plot_training_loss(losses)
         network.save_model("models/model_latest.pt")
+        
+        end_time = time.time()
+        print(f"Episode {episode + 1} completed in {end_time - start_time:.2f} seconds", flush=True)
     
     return network
 
