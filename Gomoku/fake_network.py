@@ -2,10 +2,8 @@ import numpy as np
 
 
 class FakeNetwork:
-    def __init__(self, input_shape, output_shape):
-        self.input_shape = input_shape
-        self.output_shape = output_shape
-        self.board_size = input_shape[0]
+    def __init__(self, board_size):
+        self.board_size = board_size
 
     def predict(self, state):
         # Create policy with zeros
@@ -22,3 +20,5 @@ class FakeNetwork:
         value = 0.0  # Neutral value
         return policy, value
 
+    def load_model(self, path):
+        pass

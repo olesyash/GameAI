@@ -28,11 +28,11 @@ class MCTSPlayer:
             self.backpropagate(node, reward)
 
         # Print tree before returning best move
-        print("\nFinal Tree Structure:")
-        self.print_tree(root)
+        # print("\nFinal Tree Structure:")
+        # self.print_tree(root)
         
         # Return the best child node (without exploration weight).
-        return root.best_child(exploration_weight=0)
+        return root.best_child(exploration_weight=0), root  # Return best node and root node
         
     def select(self, node):
         """Selection phase: Navigate the tree using UCT."""

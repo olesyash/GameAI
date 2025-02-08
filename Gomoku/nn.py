@@ -5,6 +5,7 @@ import torch
 from gomoku import BOARD_SIZE, BOARD_TENSOR, POLICY_PROBS, STATUS
 import os
 
+
 class GameNetwork(nn.Module):
     def __init__(self, board_size, device):
         super(GameNetwork, self).__init__()
@@ -111,11 +112,12 @@ class GameNetwork(nn.Module):
                 - value: float value prediction (-1 to 1)
         """
         # Prepare state for neural network
+        self.eval()
         board_tensor = state.encode().to(self.device)
         
-        # Add batch dimension if not present
-        if len(board_tensor.shape) == 3:  # [2, board_size, board_size]
-            board_tensor = board_tensor.unsqueeze(0)  # Add batch dimension
+        # # Add batch dimension if not present
+        # if len(board_tensor.shape) == 3:  # [2, board_size, board_size]
+        #     board_tensor = board_tensor.unsqueeze(0)  # Add batch dimension
             
         # Get policy and value predictions
         with torch.no_grad():
@@ -130,7 +132,7 @@ class GameNetwork(nn.Module):
                 value = value.cpu().item()
             if hasattr(value, 'shape') and len(value.shape) > 0:
                 value = value[0]
-        
+            
         return policy, value
 
     def save_model(self, path='models/gomoku_model.pt'):
@@ -165,3 +167,23 @@ class GameNetwork(nn.Module):
             print(f"Loaded model version {state.get('model_version', '1.0')} from {path}")
         else:
             print(f"No saved model found at {path}")
+    
+    def train_step(self, state_tensor, policy_tensor, value_tensor, learning_rate):
+        """Perform a single training step."""
+        self.train()
+        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
+        optimizer.zero_grad()
+        
+        # Forward pass
+        predicted_policy, predicted_value = self(state_tensor.to(self.device))
+        
+        # Calculate losses
+        policy_loss = F.cross_entropy(predicted_policy, policy_tensor.to(self.device))
+        value_loss = F.mse_loss(predicted_value.squeeze(), value_tensor.float().to(self.device))
+        loss = policy_loss + value_loss
+        
+        # Backward pass
+        loss.backward()
+        optimizer.step()
+        
+        return loss.item()
