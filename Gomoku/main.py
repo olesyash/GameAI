@@ -16,13 +16,21 @@ def train_model():
     
     network = GameNetwork(BOARD_SIZE, device)
     network.to(device)  # Ensure the model is on the correct device
-    network.load_model("models/model_latest.pt")
+    try:
+        network.load_model("models/model_latest.pt")
+        print("Loaded latest model", flush=True)
+    except:
+        print("No existing model found, starting fresh", flush=True)
     
     # Training parameters
     exploration_weight = 1.0
     learning_rate = 0.001
-    num_episodes = 100
+    num_episodes = 1000
     losses = []
+    
+    # Keep track of best model
+    best_win_rate = 0.0
+    evaluation_frequency = 50  # Evaluate every 50 episodes
     
     # Store all training data
     all_states = []
@@ -101,25 +109,60 @@ def train_model():
             
             # Train multiple iterations on each state
             avg_loss = 0
-            num_iterations = 5  # Number of training iterations per state
+            num_iterations = 10  # Number of training iterations per state
             for _ in range(num_iterations):
                 loss = network.train_step(board_tensor, policy_tensor, value_tensor, learning_rate)
                 avg_loss += loss / num_iterations
 
-            if idx % 10 == 0:  # Print progress periodically
+            if idx % 100 == 0:  # Print progress periodically
                 losses.append(avg_loss)
                 print(f"Episode {episode} Training step {idx}, Average Loss: {avg_loss:.4f}", flush=True)
         
-        # Save model and plot loss periodically
-        if (episode + 1) % 10 == 0:
-            network.save_model(f"models/model_iter_{episode+1}.pt")
-            plot_training_loss(losses)
+        # Save latest model and plot loss
         network.save_model("models/model_latest.pt")
+        if (episode + 1) % 10 == 0:
+            plot_training_loss(losses)
+            
+        # Evaluate model periodically
+        if (episode + 1) % evaluation_frequency == 0:
+            print(f"\nEvaluating model after episode {episode + 1}...", flush=True)
+            win_rate = evaluate_model(network)
+            
+            # Save if it's the best model so far
+            if win_rate > best_win_rate:
+                best_win_rate = win_rate
+                network.save_model("models/model_best.pt")
+                print(f"New best model saved! Win rate: {win_rate:.2%}", flush=True)
         
         end_time = time.time()
         print(f"Episode {episode + 1} completed in {end_time - start_time:.2f} seconds", flush=True)
     
     return network
+
+
+def evaluate_model(network, num_games=10):
+    """Evaluate model by playing games against MCTS"""
+    wins = 0
+    draws = 0
+    losses = 0
+    
+    puct = PUCTPlayer(1.0, Gomoku(BOARD_SIZE))
+    puct.model = network
+    mcts = MCTSPlayer(1.0)
+    
+    for game_idx in range(num_games):
+        winner = play_game(puct, mcts)
+        if winner == 1:  # PUCT wins
+            wins += 1
+        elif winner == -1:  # MCTS wins
+            losses += 1
+        else:  # Draw
+            draws += 1
+        print(f"Evaluation game {game_idx + 1}: {'PUCT Win' if winner == 1 else 'MCTS Win' if winner == -1 else 'Draw'}", flush=True)
+    
+    win_rate = (wins + 0.5 * draws) / num_games
+    print(f"Evaluation complete - Win rate: {win_rate:.2%} (Wins: {wins}, Draws: {draws}, Losses: {losses})", flush=True)
+    return win_rate
 
 
 def plot_training_loss(losses):
@@ -173,13 +216,6 @@ if __name__ == "__main__":
     # Train the model
     trained_network = train_model()
     
-    # Save the trained model
-    trained_network.save_model("models/best_gomoku_model.pt")
-
-    print("Training complete, play game mcts against trained puct", flush=True)
-    # Play a game against the trained model
-    puct = PUCTPlayer(1.0, Gomoku(BOARD_SIZE))
-    mcts = MCTSPlayer(1.0)
-    winner = play_game(puct, mcts)
-    print(f"Game finished! Winner: {'Puct' if winner == 1 else 'MCTS' if winner == -1 else 'Draw'}", flush=True)
-
+    # Final evaluation
+    print("\nFinal model evaluation:", flush=True)
+    final_win_rate = evaluate_model(trained_network, num_games=20)  # More games for final evaluation
