@@ -11,7 +11,7 @@ from MCTS import MCTSPlayer
 def train_model():
     # Initialize game and network
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    print(f"Using device: {device}", flush=True)
     
     network = GameNetwork(BOARD_SIZE, device)
     network.to(device)  # Ensure the model is on the correct device
@@ -19,7 +19,7 @@ def train_model():
     # Training parameters
     exploration_weight = 1.0
     learning_rate = 0.001
-    num_episodes = 100
+    num_episodes = 1
     losses = []
     
     # Store all training data
@@ -68,7 +68,7 @@ def train_model():
        
         # Get game result
         winner = game.get_winner()
-        print(f"Game finished! Winner: {'Black' if winner == 1 else 'White' if winner == -1 else 'Draw'}")
+        print(f"Game finished! Winner: {'Black' if winner == 1 else 'White' if winner == -1 else 'Draw'}", flush=True)
         
         # Calculate values for all states in this game
         for state in states_this_game:
@@ -104,7 +104,7 @@ def train_model():
 
             if idx % 10 == 0:  # Print progress periodically
                 losses.append(avg_loss)
-                print(f"Episode {episode} Training step {idx}, Average Loss: {avg_loss:.4f}")
+                print(f"Episode {episode} Training step {idx}, Average Loss: {avg_loss:.4f}", flush=True)
         
         # Save model and plot loss periodically
         if (episode + 1) % 10 == 0:
@@ -132,15 +132,23 @@ def plot_training_loss(losses):
         save_path = os.path.join('plots', 'training_loss.png')
         plt.savefig(save_path)
         plt.close()
-        print(f"Loss plot saved to: {os.path.abspath(save_path)}")
+        print(f"Loss plot saved to: {os.path.abspath(save_path)}", flush=True)
 
 
-def play_game(player1, player2=None):
+def play_game(puct, mcts):
     """Play a game between two players or against self"""
-    game, winner = player1.play_game(opponent=player2)
-    print(f"Game finished! Winner: {'Black' if winner == 1 else 'White' if winner == -1 else 'Draw'}")
-    # print("Final board state:")
-    # print_board(game.board)
+    game = Gomoku(BOARD_SIZE)
+
+    while not game.is_game_over():
+        state, best_node = puct.best_move(game, iterations=800)
+        move = state.last_move
+        game.make_move(move)
+
+        best_node, root = mcts.search(game, iterations=800)
+        move = best_node.state.last_move
+        game.make_move(move)
+
+    return game.get_winner()
 
 
 def print_board(board):
@@ -160,3 +168,11 @@ if __name__ == "__main__":
     
     # Save the trained model
     trained_network.save_model("models/best_gomoku_model.pt")
+
+    print("Training complete, play game mcts against trained puct", flush=True)
+    # Play a game against the trained model
+    puct = PUCTPlayer(1.0, Gomoku(BOARD_SIZE))
+    mcts = MCTSPlayer(1.0)
+    winner = play_game(puct, mcts)
+    print(f"Game finished! Winner: {'Puct' if winner == 1 else 'MCTS' if winner == -1 else 'Draw'}", flush=True)
+

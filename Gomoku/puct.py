@@ -170,26 +170,3 @@ class PUCTPlayer:
             chosen_child = np.random.choice(root.children, p=probs)
             return chosen_child.state.last_move, root
         return self.choose_best_move(root), root
-
-    def play_game(self, opponent=None):
-        """Play a single game against an opponent or self
-        
-        Args:
-            opponent: Optional opponent player (if None, plays against self)
-            
-        Returns:
-            game: The completed game
-            winner: The winning player (1 or -1) or 0 for draw
-        """
-        game = Gomoku(self.model.board_size)
-        
-        while not game.is_game_over():
-            if game.next_player == 1 or opponent is None:
-                state, _ = self.best_move(game, 100)
-                move = state.last_move
-            else:
-                state, _ = opponent.best_move(game, 100)
-                move = state.last_move
-            game.make_move(move)
-        
-        return game, game.get_winner()
