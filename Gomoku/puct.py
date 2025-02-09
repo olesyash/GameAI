@@ -71,12 +71,11 @@ class PUCTPlayer:
                 move_prob = policy[move_index].item() if isinstance(policy, torch.Tensor) else policy[move_index]
                 child_node = PUCTNode(new_state, parent=node, p=move_prob)
                 node.children.append(child_node)
-                return child_node
-        raise Exception("No moves to expand")
+        return node
 
     def back_propagate(self, node, value):
         while node is not None:
-            node.N += 1 # Increment the visit count
+            node.N += 1  # Increment the visit count
             node.Q += (1/node.N) * (value - node.Q)  # Update the value
             node = node.parent
             value = -value
