@@ -25,12 +25,12 @@ def train_model():
     # Training parameters
     exploration_weight = 1.0
     learning_rate = 0.001
-    num_episodes = 1000
+    num_episodes = 100
     losses = []
     
     # Keep track of best model
     best_win_rate = 0.0
-    evaluation_frequency = 50  # Evaluate every 50 episodes
+    evaluation_frequency = 10  # Evaluate every 50 episodes
     
     # Store all training data
     all_states = []
@@ -84,7 +84,7 @@ def train_model():
         
         # Calculate values for all states in this game
         for state in states_this_game:
-            player = state.next_player
+            player = state.get_current_player()
             if winner == 0:
                 value = 0  # Draw
             else:
@@ -114,7 +114,7 @@ def train_model():
                 loss = network.train_step(board_tensor, policy_tensor, value_tensor, learning_rate)
                 avg_loss += loss / num_iterations
 
-            if idx % 100 == 0:  # Print progress periodically
+            if idx % 10 == 0:  # Print progress periodically
                 losses.append(avg_loss)
                 print(f"Episode {episode} Training step {idx}, Average Loss: {avg_loss:.4f}", flush=True)
         

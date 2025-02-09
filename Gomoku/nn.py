@@ -8,37 +8,35 @@ import os
 
 class GameNetwork(nn.Module):
     def __init__(self, board_size, device):
-        super(GameNetwork, self).__init__()
+        super().__init__()
         self.board_size = board_size
         self.device = device
         
-        # Initial convolution layer
-        self.conv_input = nn.Conv2d(2, 256, kernel_size=3, padding=1)
+        # Network architecture
+        self.conv_input = nn.Conv2d(3, 256, 3, padding=1)  
         self.bn_input = nn.BatchNorm2d(256)
         
         # Residual layers
-        self.num_residual = 10
         self.residual_layers = nn.ModuleList([
-            nn.ModuleDict({
-                'conv1': nn.Conv2d(256, 256, kernel_size=3, padding=1),
-                'bn1': nn.BatchNorm2d(256),
-                'conv2': nn.Conv2d(256, 256, kernel_size=3, padding=1),
-                'bn2': nn.BatchNorm2d(256)
-            }) for _ in range(self.num_residual)
+            nn.Sequential(
+                nn.Conv2d(256, 256, 3, padding=1),
+                nn.BatchNorm2d(256),
+                nn.ReLU(),
+                nn.Conv2d(256, 256, 3, padding=1),
+                nn.BatchNorm2d(256)
+            ) for _ in range(3)
         ])
         
-        # Policy head - predicting move probabilities
-        self.policy_conv = nn.Conv2d(256, 32, kernel_size=1)
-        self.policy_bn = nn.BatchNorm2d(32)
-        self.policy_fc = nn.Linear(32 * board_size * board_size, board_size * board_size)
+        # Policy head
+        self.policy_conv = nn.Conv2d(256, 2, 1)
+        self.policy_bn = nn.BatchNorm2d(2)
+        self.policy_fc = nn.Linear(2 * board_size * board_size, board_size * board_size)
         
-        # Value head - predicting game outcome
-        self.value_conv = nn.Conv2d(256, 32, kernel_size=1)
-        self.value_bn = nn.BatchNorm2d(32)
-        self.value_fc1 = nn.Linear(32 * board_size * board_size, 256)
+        # Value head
+        self.value_conv = nn.Conv2d(256, 1, 1)
+        self.value_bn = nn.BatchNorm2d(1)
+        self.value_fc1 = nn.Linear(board_size * board_size, 256)
         self.value_fc2 = nn.Linear(256, 1)
-        
-        self._initialize_weights()
     
     def _initialize_weights(self):
         for m in self.modules():
@@ -59,37 +57,43 @@ class GameNetwork(nn.Module):
         """Forward pass through the network.
         
         Args:
-            x: Input tensor of shape [2, board_size, board_size] or [batch_size, 2, board_size, board_size]
+            x: Input tensor of shape [3, board_size, board_size] or [batch_size, 3, board_size, board_size]
         Returns:
             tuple: (policy, value)
                 - policy: tensor of shape [board_size * board_size] or [batch_size, board_size * board_size]
                 - value: tensor of shape [1] or [batch_size, 1]
         """
-        x = x.to(self.device)
-        
-        # Add batch dimension if input is 3D
+        # Add batch dimension if not present
         if len(x.shape) == 3:
             x = x.unsqueeze(0)
+            
+        # Get valid moves mask from input
+        valid_moves = x[:, 2:3]  # Shape: [batch_size, 1, board_size, board_size]
         
-        # Initial convolution block
+        # Initial convolution
         x = F.relu(self.bn_input(self.conv_input(x)))
         
-        # Residual blocks
+        # Residual layers
         for layer in self.residual_layers:
-            identity = x
-            out = F.relu(layer['bn1'](layer['conv1'](x)))
-            out = layer['bn2'](layer['conv2'](out))
-            x = F.relu(out + identity)  # Skip connection
+            residual = x
+            x = layer(x)
+            x += residual
+            x = F.relu(x)
         
         # Policy head
         policy = F.relu(self.policy_bn(self.policy_conv(x)))
-        policy = policy.view(x.size(0), -1)
+        policy = policy.reshape(-1, 2 * self.board_size * self.board_size)
         policy = self.policy_fc(policy)
+        
+        # Mask illegal moves by setting their logits to -infinity
+        policy = policy.reshape(-1, self.board_size * self.board_size)
+        valid_moves = valid_moves.reshape(-1, self.board_size * self.board_size)
+        policy = policy.masked_fill(valid_moves == 0, float('-inf'))
         policy = F.softmax(policy, dim=1)
         
         # Value head
         value = F.relu(self.value_bn(self.value_conv(x)))
-        value = value.view(x.size(0), -1)
+        value = value.reshape(-1, self.board_size * self.board_size)
         value = F.relu(self.value_fc1(value))
         value = torch.tanh(self.value_fc2(value))
         
@@ -115,10 +119,6 @@ class GameNetwork(nn.Module):
         self.eval()
         board_tensor = state.encode().to(self.device)
         
-        # # Add batch dimension if not present
-        # if len(board_tensor.shape) == 3:  # [2, board_size, board_size]
-        #     board_tensor = board_tensor.unsqueeze(0)  # Add batch dimension
-            
         # Get policy and value predictions
         with torch.no_grad():
             policy, value = self.forward(board_tensor)

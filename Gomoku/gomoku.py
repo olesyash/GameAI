@@ -210,27 +210,31 @@ class Gomoku:
         """Encode the game state for neural network input.
         
         Returns:
-            torch.Tensor: Two-channel tensor representing the board state:
+            torch.Tensor: Three-channel tensor representing the board state:
                 - Channel 1: Current player's moves (1 where current player has moved, 0 elsewhere)
                 - Channel 2: Opponent's moves (1 where opponent has moved, 0 elsewhere)
+                - Channel 3: Valid moves mask (1 for empty/legal positions, 0 for occupied/illegal)
         """
         current_player = self.get_current_player()
         board_size = len(self.board)
         
-        # Create two empty channels
+        # Create three channels
         current_player_channel = torch.zeros((board_size, board_size))
         opponent_channel = torch.zeros((board_size, board_size))
+        valid_moves_channel = torch.ones((board_size, board_size))  # Start with all moves valid
         
         # Fill the channels based on the board state
         for i in range(board_size):
             for j in range(board_size):
                 if self.board[i][j] == current_player:
                     current_player_channel[i][j] = 1
+                    valid_moves_channel[i][j] = 0  # Position is taken
                 elif self.board[i][j] != 0:  # If it's not empty and not current player, it's opponent
                     opponent_channel[i][j] = 1
+                    valid_moves_channel[i][j] = 0  # Position is taken
         
-        # Stack the channels
-        board_tensor = torch.stack([current_player_channel, opponent_channel])
+        # Stack the channels: current player, opponent, valid moves
+        board_tensor = torch.stack([current_player_channel, opponent_channel, valid_moves_channel])
         return board_tensor
 
     def decode(self, value):
