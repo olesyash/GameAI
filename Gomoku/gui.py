@@ -177,7 +177,7 @@ class GomokuGUI:
                 self.draw_board()
         # PUCT
         elif self.game_mode == PUCT:
-            state, _ = self.puct_player.best_move(self.game.clone(), iterations=1000)
+            state, _ = self.puct_player.best_move(self.game.clone(), iterations=7000)
             move = state.last_move
             if self.game.make_move(move):
                 self.draw_board()

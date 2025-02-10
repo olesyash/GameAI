@@ -206,6 +206,63 @@ class Gomoku:
         clone.winner = self.winner
         return clone
 
+    def compute_threat_matrix(self, board):
+        """ Compute a threat matrix based on the current board position.
+        
+        Args:
+            board (np.array): The current board state (size NxN)
+        
+        Returns:
+            np.array: Threat matrix of the same size as the board, with threat values.
+        """
+        board_size = board.shape[0]
+        threat_matrix = np.zeros((board_size, board_size))
+
+        # Scan every cell on the board
+        for r in range(board_size):
+            for c in range(board_size):
+                if board[r, c] != 0:
+                    continue  # Skip occupied positions
+
+                # Check in four possible directions (horizontal, vertical, two diagonals)
+                for dr, dc in [(1, 0), (0, 1), (1, 1), (1, -1)]:
+                    count = 0
+                    open_ends = 0
+                    
+                    # Look forward
+                    for i in range(1, 5):
+                        nr, nc = r + i * dr, c + i * dc
+                        if 0 <= nr < board_size and 0 <= nc < board_size:
+                            if board[nr, nc] == 1:  # Black stone
+                                count += 1
+                            elif board[nr, nc] == 0:  # Empty space
+                                open_ends += 1
+                            else:
+                                break  # Blocked by opponent
+
+                    # Look backward
+                    for i in range(1, 5):
+                        nr, nc = r - i * dr, c - i * dc
+                        if 0 <= nr < board_size and 0 <= nc < board_size:
+                            if board[nr, nc] == 1:
+                                count += 1
+                            elif board[nr, nc] == 0:
+                                open_ends += 1
+                            else:
+                                break  # Blocked by opponent
+
+                    # Assign threat scores based on patterns
+                    if count == 4 and open_ends > 0:
+                        threat_matrix[r, c] += 4  # Open Four - very strong
+                    elif count == 3 and open_ends > 1:
+                        threat_matrix[r, c] += 3  # Open Three - strong
+                    elif count == 3 and open_ends == 1:
+                        threat_matrix[r, c] += 2  # Closed Three - moderate
+                    elif count == 2 and open_ends > 1:
+                        threat_matrix[r, c] += 1  # Two in a row - potential move
+
+        return threat_matrix
+
     def encode(self):
         """Encode the game state for neural network input.
         
@@ -233,8 +290,11 @@ class Gomoku:
                     opponent_channel[i][j] = 1
                     valid_moves_channel[i][j] = 0  # Position is taken
         
-        # Stack the channels: current player, opponent, valid moves
-        board_tensor = torch.stack([current_player_channel, opponent_channel, valid_moves_channel])
+        # Compute threat matrix
+        threat_matrix = self.compute_threat_matrix(self.board)
+
+        # Stack all input channels together
+        board_tensor = torch.tensor(np.stack([current_player_channel, opponent_channel, valid_moves_channel, threat_matrix]), dtype=torch.float32)
         return board_tensor
 
     def decode(self, value):

@@ -49,7 +49,7 @@ class PUCTPlayer:
         else:
             self.model = GameNetwork(board_size=game.board_size, device=self.device)
             self.model.to(self.device)
-        self.model.load_model('models/best_gomoku_model.pt')
+        self.model.load_model('Gomoku/models/model_latest.pt')
 
     def select(self, node):
         """Selection phase: Navigate the tree using UCT."""
@@ -81,6 +81,8 @@ class PUCTPlayer:
             value = -value
 
     def choose_best_move(self, root_node):
+        if not root_node.children:
+            return None
         best_child = max(root_node.children, key=lambda child: child.N)
         return best_child.state
 

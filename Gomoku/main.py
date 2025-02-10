@@ -16,6 +16,7 @@ def train_model():
     
     network = GameNetwork(BOARD_SIZE, device)
     network.to(device)  # Ensure the model is on the correct device
+   
     try:
         network.load_model("models/model_latest.pt")
         print("Loaded latest model", flush=True)
@@ -23,60 +24,99 @@ def train_model():
         print("No existing model found, starting fresh", flush=True)
     
     # Training parameters
-    exploration_weight = 1.0
-    learning_rate = 0.001
-    num_episodes = 100
+
+    
+
+    learning_rate = 0.0003
+    num_episodes = 60
     losses = []
     
     # Keep track of best model
     best_win_rate = 0.0
-    evaluation_frequency = 10  # Evaluate every 50 episodes
+    evaluation_frequency = 20  # Evaluate every 50 episodes
     
     # Store all training data
     all_states = []
     all_policies = []
     all_values = []
     
+    max_training_data = 500
+    all_states = all_states[-max_training_data:]
+    all_policies = all_policies[-max_training_data:]
+    all_values = all_values[-max_training_data:]
+
+    
+    
+    
     for episode in range(num_episodes):
         start_time = time.time()
+        exploration_weight = max(0.1, 1.0 / (1 + episode / 50))  # Gradual decrease 1
         
         game = Gomoku(board_size=BOARD_SIZE)
         states_this_game = []  # Store all states in this game
         policies_this_game = []  # Store MCTS policies for each state
         
         # Create PUCT player with current network
-        puct = PUCTPlayer(exploration_weight, game, fake_network=True)
+        puct = PUCTPlayer(exploration_weight, game, fake_network=False)
         # Create MCTS player
         mcts = MCTSPlayer(exploration_weight)
         
         # Play one game
         while not game.is_game_over():
-            # Get move probabilities from PUCT
-            state, best_node = puct.best_move(game, iterations=800)
-            move = state.last_move
-            game.make_move(move)
+            
+            if(episode % 2 == 0):
+                # Get move probabilities from PUCT
+                state, best_node = puct.best_move(game, iterations=800)
+                if state is None:
+                    break 
+                move = state.last_move
+                game.make_move(move)
+                policy = np.zeros(BOARD_SIZE * BOARD_SIZE)
+                total_visits = sum(child.N for child in best_node.children)
+                if total_visits > 0:
+                    for child in best_node.children:
+                        move = child.state.last_move
+                        move_idx = move[0] * BOARD_SIZE + move[1]
+                        policy[move_idx] = child.N / total_visits
 
-            # Get move from MCTS
-            best_node, root = mcts.search(game, iterations=800)
+                policies_this_game.append(policy)  
+                # Get move from MCTS
+                best_node, root = mcts.search(game, iterations=800)
+                            
+                # Make the move
+                move = best_node.state.last_move
+                game.make_move(move)
+            else:
+               
+                # Get move from MCTS
+                best_node, root = mcts.search(game, iterations=7000)
+                            
+                # Make the move
+                move = best_node.state.last_move
+                game.make_move(move)
+                
+                 # Get move probabilities from PUCT
+                state, _ = puct.best_move(game, iterations=7000 )
+                if (state is None):
+                    break
+                move = state.last_move
+                game.make_move(move)
+            
+            # Calculate policy from MCTS
+                policy = np.zeros(BOARD_SIZE * BOARD_SIZE)
+                total_visits = sum(child.visits for child in root.children)
+                if total_visits > 0:
+                    for child in root.children:
+                        move = child.state.last_move
+                        move_idx = move[0] * BOARD_SIZE + move[1]
+                        policy[move_idx] = child.visits / total_visits
+
+                policies_this_game.append(policy) 
+          
 
             current_state = game.clone()
             states_this_game.append(current_state)
-            
-            # Calculate policy from MCTS visit counts
-            policy = np.zeros(BOARD_SIZE * BOARD_SIZE)
-            total_visits = sum(child.visits for child in root.children)
-            
-            if total_visits > 0:
-                for child in root.children:
-                    move = child.state.last_move
-                    move_idx = move[0] * BOARD_SIZE + move[1]
-                    policy[move_idx] = child.visits / total_visits
-            
-            policies_this_game.append(policy)
-            
-            # Make the move
-            move = best_node.state.last_move
-            game.make_move(move)
+         
        
         # Get game result
         winner = game.get_winner()
@@ -127,6 +167,10 @@ def train_model():
         if (episode + 1) % evaluation_frequency == 0:
             print(f"\nEvaluating model after episode {episode + 1}...", flush=True)
             win_rate = evaluate_model(network)
+            print('policy')
+            for policy in policies_this_game:
+                print(policy)
+            
             
             # Save if it's the best model so far
             if win_rate > best_win_rate:

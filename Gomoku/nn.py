@@ -12,8 +12,8 @@ class GameNetwork(nn.Module):
         self.board_size = board_size
         self.device = device
         
-        # Network architecture
-        self.conv_input = nn.Conv2d(3, 256, 3, padding=1)  
+        # Update input layer to accept 4 channels (adding threat matrix)
+        self.conv_input = nn.Conv2d(4, 256, 3, padding=1)  # 🔥 Changed from 3 → 4 channels
         self.bn_input = nn.BatchNorm2d(256)
         
         # Residual layers
@@ -168,22 +168,25 @@ class GameNetwork(nn.Module):
         else:
             print(f"No saved model found at {path}")
     
-    def train_step(self, state_tensor, policy_tensor, value_tensor, learning_rate):
-        """Perform a single training step."""
+    def train_step(self, state_tensor, policy_tensor, value_tensor):
+        """Perform a single training step with learning rate scheduling."""
         self.train()
-        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
-        optimizer.zero_grad()
         
         # Forward pass
         predicted_policy, predicted_value = self(state_tensor.to(self.device))
         
-        # Calculate losses
+        # Compute losses
         policy_loss = F.cross_entropy(predicted_policy, policy_tensor.to(self.device))
         value_loss = F.mse_loss(predicted_value.squeeze(), value_tensor.float().to(self.device))
         loss = policy_loss + value_loss
         
         # Backward pass
+        self.optimizer.zero_grad()  # Reset gradients
         loss.backward()
-        optimizer.step()
+        torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)  # Prevent exploding gradients
+        self.optimizer.step()  # Update model weights
         
+        # Update the learning rate using the scheduler
+        self.scheduler.step()
+
         return loss.item()
