@@ -27,8 +27,8 @@ def train_model():
 
     
 
-    learning_rate = 0.0003
-    num_episodes = 60
+    learning_rate = 0.0001
+    num_episodes = 1000
     losses = []
     
     # Keep track of best model
@@ -40,7 +40,7 @@ def train_model():
     all_policies = []
     all_values = []
     
-    max_training_data = 500
+    max_training_data = 5000
     all_states = all_states[-max_training_data:]
     all_policies = all_policies[-max_training_data:]
     all_values = all_values[-max_training_data:]
@@ -103,15 +103,15 @@ def train_model():
                 game.make_move(move)
             
             # Calculate policy from MCTS
-                policy = np.zeros(BOARD_SIZE * BOARD_SIZE)
-                total_visits = sum(child.visits for child in root.children)
-                if total_visits > 0:
-                    for child in root.children:
-                        move = child.state.last_move
-                        move_idx = move[0] * BOARD_SIZE + move[1]
-                        policy[move_idx] = child.visits / total_visits
+            policy = np.zeros(BOARD_SIZE * BOARD_SIZE)
+            total_visits = sum(child.visits for child in root.children)
+            if total_visits > 0:
+                for child in root.children:
+                    move = child.state.last_move
+                    move_idx = move[0] * BOARD_SIZE + move[1]
+                    policy[move_idx] = child.visits / total_visits
 
-                policies_this_game.append(policy) 
+            policies_this_game.append(policy) 
           
 
             current_state = game.clone()
@@ -136,23 +136,24 @@ def train_model():
         all_policies.extend(policies_this_game)
         
         # Train on all collected data
-        for idx in range(len(all_states)):
-            # Prepare training data
-            state = all_states[idx]
-            policy = all_policies[idx]
-            value = all_values[idx]
-            
-            # Convert to tensors
-            board_tensor = state.encode().to(device)
-            policy_tensor = torch.from_numpy(policy).float().to(device)
-            value_tensor = torch.tensor([value], dtype=torch.float32, device=device)
-            
-            # Train multiple iterations on each state
-            avg_loss = 0
-            num_iterations = 10  # Number of training iterations per state
-            for _ in range(num_iterations):
-                loss = network.train_step(board_tensor, policy_tensor, value_tensor, learning_rate)
-                avg_loss += loss / num_iterations
+        batch_size = 128  # Instead of 32 or 64
+
+        for epoch in range(10):  # Train multiple times on collected data
+            indices = np.random.permutation(len(all_states))  # Shuffle data
+            for i in range(0, len(all_states), batch_size):
+                batch_indices = indices[i:i + batch_size]
+                
+                # Create batch tensors
+                state_batch = torch.stack([all_states[idx].encode().to(device) for idx in batch_indices])
+                policy_batch = torch.stack([torch.from_numpy(all_policies[idx]).float().to(device) for idx in batch_indices])
+                value_batch = torch.tensor([all_values[idx] for idx in batch_indices], dtype=torch.float32, device=device)
+
+                # Perform a training step with the entire batch
+                loss = network.train_step(state_batch, policy_batch, value_batch)
+                
+                losses.append(loss)
+
+            print(f"Epoch {epoch+1}, Average Loss: {loss:.4f}", flush=True)
 
             if idx % 10 == 0:  # Print progress periodically
                 losses.append(avg_loss)

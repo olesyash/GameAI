@@ -7,16 +7,15 @@ import os
 
 
 class GameNetwork(nn.Module):
-    def __init__(self, board_size, device):
+    def __init__(self, board_size, device, learning_rate=0.0001):
         super().__init__()
         self.board_size = board_size
         self.device = device
-        
-        # Update input layer to accept 4 channels (adding threat matrix)
-        self.conv_input = nn.Conv2d(4, 256, 3, padding=1)  # 🔥 Changed from 3 → 4 channels
+
+        # Define network layers (unchanged)
+        self.conv_input = nn.Conv2d(4, 256, 3, padding=1)
         self.bn_input = nn.BatchNorm2d(256)
-        
-        # Residual layers
+
         self.residual_layers = nn.ModuleList([
             nn.Sequential(
                 nn.Conv2d(256, 256, 3, padding=1),
@@ -26,18 +25,20 @@ class GameNetwork(nn.Module):
                 nn.BatchNorm2d(256)
             ) for _ in range(3)
         ])
-        
-        # Policy head
+
+        # Policy and value heads
         self.policy_conv = nn.Conv2d(256, 2, 1)
         self.policy_bn = nn.BatchNorm2d(2)
         self.policy_fc = nn.Linear(2 * board_size * board_size, board_size * board_size)
-        
-        # Value head
+
         self.value_conv = nn.Conv2d(256, 1, 1)
         self.value_bn = nn.BatchNorm2d(1)
         self.value_fc1 = nn.Linear(board_size * board_size, 256)
         self.value_fc2 = nn.Linear(256, 1)
-    
+
+        # Initialize optimizer and scheduler
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=50, gamma=0.95)  # Reduce LR every 50 steps by 5%
     def _initialize_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -173,12 +174,16 @@ class GameNetwork(nn.Module):
         self.train()
         
         # Forward pass
-        predicted_policy, predicted_value = self(state_tensor.to(self.device))
+        #predicted_policy, predicted_value = self(state_tensor.to(self.device))
+        predicted_policy = F.softmax(predicted_policy / torch.norm(predicted_policy, p=2, dim=-1, keepdim=True), dim=-1)
+
         
         # Compute losses
         policy_loss = F.cross_entropy(predicted_policy, policy_tensor.to(self.device))
         value_loss = F.mse_loss(predicted_value.squeeze(), value_tensor.float().to(self.device))
-        loss = policy_loss + value_loss
+        policy_weight = 0.7
+        value_weight = 0.3
+        loss = policy_weight * policy_loss + value_weight * value_loss
         
         # Backward pass
         self.optimizer.zero_grad()  # Reset gradients

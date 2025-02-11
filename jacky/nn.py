@@ -14,7 +14,7 @@ from tensorflow.keras.optimizers import Adam
 class NN():
     def __init__(self):
         # Set the learning rate and create optimizer with decay
-        learning_rate = 0.001
+        learning_rate = 0.0001
         optimizer = Adam(learning_rate=learning_rate)
 
         # Create a deeper network

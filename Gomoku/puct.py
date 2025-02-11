@@ -49,7 +49,7 @@ class PUCTPlayer:
         else:
             self.model = GameNetwork(board_size=game.board_size, device=self.device)
             self.model.to(self.device)
-        self.model.load_model('Gomoku/models/model_latest.pt')
+        self.model.load_model('models/model_best.pt')
 
     def select(self, node):
         """Selection phase: Navigate the tree using UCT."""
