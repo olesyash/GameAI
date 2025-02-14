@@ -156,9 +156,7 @@ class PUCTPlayer:
                     node.Q = value
 
                 node = self.expand(node, curr_policy)
-                
-               
-                    
+
                 # 3. Backpropagation
                 self.back_propagate(node, -value)
         
