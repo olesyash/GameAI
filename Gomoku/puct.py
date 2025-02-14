@@ -157,12 +157,10 @@ class PUCTPlayer:
 
                 node = self.expand(node, curr_policy)
                 
-                # Flip value if needed based on player perspective
-                if root.acting_player != node.acting_player:
-                    value = -value
+               
                     
                 # 3. Backpropagation
-                self.back_propagate(node, value)
+                self.back_propagate(node, -value)
         
         # Return move based on visit count distribution during training, or best move during evaluation
         if is_training:

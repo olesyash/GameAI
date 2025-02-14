@@ -5,6 +5,8 @@ import torch
 from gomoku import BOARD_SIZE, BOARD_TENSOR, POLICY_PROBS, STATUS
 import os
 
+import torch.nn as nn
+import torch.nn.functional as F
 
 class GameNetwork(nn.Module):
     def __init__(self, board_size, device, learning_rate=0.0001):
@@ -12,10 +14,14 @@ class GameNetwork(nn.Module):
         self.board_size = board_size
         self.device = device
 
-        # Define network layers (unchanged)
+        # Define network layers
         self.conv_input = nn.Conv2d(4, 256, 3, padding=1)
         self.bn_input = nn.BatchNorm2d(256)
 
+        # Dropout to prevent overfitting (20% probability)
+        self.dropout = nn.Dropout(p=0.2)
+
+        # Residual layers
         self.residual_layers = nn.ModuleList([
             nn.Sequential(
                 nn.Conv2d(256, 256, 3, padding=1),
@@ -36,74 +42,42 @@ class GameNetwork(nn.Module):
         self.value_fc1 = nn.Linear(board_size * board_size, 256)
         self.value_fc2 = nn.Linear(256, 1)
 
-        # Initialize optimizer and scheduler
+        # Optimizer and scheduler
         self.optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=50, gamma=0.95)  # Reduce LR every 50 steps by 5%
-    def _initialize_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                # He initialization for ReLU
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.ones_(m.weight)
-                nn.init.zeros_(m.bias)
-            elif isinstance(m, nn.Linear):
-                # He initialization for the linear layers
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                nn.init.zeros_(m.bias)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=50, gamma=0.95)
 
     def forward(self, x):
-        """Forward pass through the network.
-        
-        Args:
-            x: Input tensor of shape [3, board_size, board_size] or [batch_size, 3, board_size, board_size]
-        Returns:
-            tuple: (policy, value)
-                - policy: tensor of shape [board_size * board_size] or [batch_size, board_size * board_size]
-                - value: tensor of shape [1] or [batch_size, 1]
-        """
-        # Add batch dimension if not present
+        """Forward pass through the network."""
         if len(x.shape) == 3:
             x = x.unsqueeze(0)
-            
-        # Get valid moves mask from input
-        valid_moves = x[:, 2:3]  # Shape: [batch_size, 1, board_size, board_size]
-        
+
         # Initial convolution
         x = F.relu(self.bn_input(self.conv_input(x)))
-        
-        # Residual layers
+
+        # Apply dropout after the first convolution
+        x = self.dropout(x)
+
+        # Residual layers with dropout
         for layer in self.residual_layers:
             residual = x
             x = layer(x)
+            x = self.dropout(x)  # Apply dropout after each residual block
             x += residual
             x = F.relu(x)
-        
+
         # Policy head
         policy = F.relu(self.policy_bn(self.policy_conv(x)))
         policy = policy.reshape(-1, 2 * self.board_size * self.board_size)
         policy = self.policy_fc(policy)
-        
-        # Mask illegal moves by setting their logits to -infinity
-        policy = policy.reshape(-1, self.board_size * self.board_size)
-        valid_moves = valid_moves.reshape(-1, self.board_size * self.board_size)
-        policy = policy.masked_fill(valid_moves == 0, float('-inf'))
-        policy = F.softmax(policy, dim=1)
-        
+
         # Value head
         value = F.relu(self.value_bn(self.value_conv(x)))
         value = value.reshape(-1, self.board_size * self.board_size)
         value = F.relu(self.value_fc1(value))
         value = torch.tanh(self.value_fc2(value))
-        
-        # Remove batch dimension if it was added
-        if len(x.shape) == 4 and x.size(0) == 1:
-            policy = policy.squeeze(0)
-            value = value.squeeze(0)
-        
+
         return policy, value
+
 
     def predict(self, state):
         """Get policy and value predictions for a game state
@@ -170,28 +144,41 @@ class GameNetwork(nn.Module):
             print(f"No saved model found at {path}")
     
     def train_step(self, state_tensor, policy_tensor, value_tensor):
-        """Perform a single training step with learning rate scheduling."""
+        """Perform a single training step with debugging for NaN values."""
         self.train()
         
         # Forward pass
-        #predicted_policy, predicted_value = self(state_tensor.to(self.device))
+        predicted_policy, predicted_value = self(state_tensor.to(self.device))
+
+        # Debugging: Check if policy or value is NaN
+        if torch.isnan(predicted_policy).any() or torch.isnan(predicted_value).any():
+            print(" WARNING: NaN detected in forward pass!")
+            return float('nan')  # Prevents corrupt training updates
+
+        # Normalize policy logits before softmax
         predicted_policy = F.softmax(predicted_policy / torch.norm(predicted_policy, p=2, dim=-1, keepdim=True), dim=-1)
 
-        
         # Compute losses
         policy_loss = F.cross_entropy(predicted_policy, policy_tensor.to(self.device))
         value_loss = F.mse_loss(predicted_value.squeeze(), value_tensor.float().to(self.device))
+
+        # Debugging: Check for NaN in loss
+        if torch.isnan(policy_loss).any() or torch.isnan(value_loss).any():
+            print(" WARNING: NaN detected in loss!")
+            return float('nan')
+
+        # Apply weighted loss
         policy_weight = 0.7
         value_weight = 0.3
         loss = policy_weight * policy_loss + value_weight * value_loss
-        
+
         # Backward pass
-        self.optimizer.zero_grad()  # Reset gradients
+        self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)  # Prevent exploding gradients
-        self.optimizer.step()  # Update model weights
+        torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
+        self.optimizer.step()
         
-        # Update the learning rate using the scheduler
+        # Update learning rate
         self.scheduler.step()
 
         return loss.item()
