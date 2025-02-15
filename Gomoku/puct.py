@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from gomoku import Gomoku, BOARD_SIZE, BOARD_TENSOR, POLICY_PROBS, STATUS
 import time
 import os
-BEST_MODEL_PATH = os.path.join("models", "best_checkpoint.pt")
+BEST_MODEL_PATH = os.path.join("models", "model_best.pt")
 
 
 class PUCTNode:
@@ -66,13 +66,33 @@ class PUCTPlayer:
     def expand(self, node, policy):
         """Expansion phase: Add a new child node for an unvisited move."""
         possible_moves = node.state.legal_moves()
+        board_size = node.state.board_size
+        
+        # Create a mask for valid moves and zero out invalid moves
+        valid_moves_mask = torch.zeros(board_size * board_size, device=policy.device if isinstance(policy, torch.Tensor) else None)
+        for move in possible_moves:
+            move_index = move[0] * board_size + move[1]
+            valid_moves_mask[move_index] = 1
+            
+        # Apply mask and normalize probabilities
+        if isinstance(policy, torch.Tensor):
+            masked_policy = policy * valid_moves_mask
+            # Normalize only if sum is not zero
+            if masked_policy.sum() > 0:
+                masked_policy = masked_policy / masked_policy.sum()
+        else:
+            masked_policy = policy * valid_moves_mask.cpu().numpy()
+            # Normalize only if sum is not zero
+            if masked_policy.sum() > 0:
+                masked_policy = masked_policy / masked_policy.sum()
+        
+        # Create child nodes for valid moves
         for move in possible_moves:
             if move not in [child.state.last_move for child in node.children]:
                 new_state = node.state.clone()
                 new_state.make_move(move)
-                # Convert (row, col) to index in the policy vector
-                move_index = move[0] * node.state.board_size + move[1]
-                move_prob = policy[move_index].item() if isinstance(policy, torch.Tensor) else policy[move_index]
+                move_index = move[0] * board_size + move[1]
+                move_prob = masked_policy[move_index].item() if isinstance(masked_policy, torch.Tensor) else masked_policy[move_index]
                 child_node = PUCTNode(new_state, parent=node, p=move_prob)
                 node.children.append(child_node)
         return node
@@ -80,7 +100,7 @@ class PUCTPlayer:
     def back_propagate(self, node, value):
         while node is not None:
             node.N += 1  # Increment the visit count
-            node.Q = (node.N * node.Q + value) / (node.N + 1) # Update the value
+            node.Q = (node.N * node.Q + value) / (node.N + 1)  # Update the value
             node = node.parent
             value = -value
 
@@ -155,9 +175,6 @@ class PUCTPlayer:
                 else:
                     # Get policy and value from neural network
                     curr_policy, value = self.model.predict(node.state)
-                
-                if node.Q == 0:  # Only set value if not already set
-                    node.Q = value
 
                 node = self.expand(node, curr_policy)
 
