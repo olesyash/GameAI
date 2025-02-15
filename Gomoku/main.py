@@ -13,33 +13,33 @@ def train_model():
     # Initialize game and network
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}", flush=True)
-    
-    network = GameNetwork(BOARD_SIZE, device)
+
+    learning_rate = 0.001
+    network = GameNetwork(BOARD_SIZE, device, learning_rate=learning_rate)
     network.to(device)  # Ensure the model is on the correct device
-   
+
     try:
         network.load_model(os.path.join("models", "model_best.pt"))
         print("Loaded latest model", flush=True)
     except:
         print("No existing model found, starting fresh", flush=True)
-    
+
     # Training parameters
 
-    
 
-    learning_rate = 0.0001
+
     num_episodes = 100
     losses = []
-    
+
     # Keep track of best model
     best_win_rate = 0.0
     evaluation_frequency = 20  # Evaluate every 50 episodes
-    
+
     # Store all training data
     all_states = []
     all_policies = []
     all_values = []
-    
+
     max_training_data = 5000
     all_states = all_states[-max_training_data:]
     all_policies = all_policies[-max_training_data:]
@@ -50,16 +50,16 @@ def train_model():
     for episode in range(num_episodes):
         start_time = time.time()
         exploration_weight = 1.4
-        
+
         game = Gomoku(board_size=BOARD_SIZE)
         states_this_game = []  # Store all states in this game
         policies_this_game = []  # Store MCTS policies for each state
-        
+
 
         # Create MCTS player
         mcts1 = MCTSPlayer(exploration_weight)
         mcts2 = MCTSPlayer(exploration_weight)
-        
+
         # Play one game
         while not game.is_game_over():
 
@@ -105,8 +105,8 @@ def train_model():
 
             current_state = game.clone()
             states_this_game.append(current_state)
-            
-       
+
+
         # Get game result
         winner = game.get_winner()
         print(f"Episode {episode + 1}, Winner: {'Black' if winner == 1 else 'White' if winner == -1 else 'Draw'}", flush=True)
@@ -128,7 +128,7 @@ def train_model():
         for batch_idx in range(0, len(all_states), batch_size):
             end_idx = min(batch_idx + batch_size, len(all_states))
             batch_indices = range(batch_idx, end_idx)
-            
+
             # Create batch tensors
             state_batch = torch.stack([all_states[idx].encode().to(device) for idx in batch_indices])
             policy_batch = torch.stack([torch.from_numpy(all_policies[idx]).float().to(device) for idx in batch_indices])
@@ -137,7 +137,7 @@ def train_model():
             # Perform a training step with the entire batch
             batch_loss = network.train_step(state_batch, policy_batch, value_batch)
             avg_loss += batch_loss / num_batches  # Use corrected denominator
-        
+
         losses.append(avg_loss)  # Store loss
 
         print(f"Episode {episode+1}, Average Loss: {avg_loss:.4f}", flush=True)
@@ -157,16 +157,16 @@ def train_model():
             print('states')
             for state in states_this_game:
                 print(state)
-                
+
             # Save if it's the best model so far
             if win_rate > best_win_rate:
                 best_win_rate = win_rate
                 network.save_model("models/model_best.pt")
                 print(f"New best model saved! Win rate: {win_rate:.2%}", flush=True)
-            
+
             end_time = time.time()
             print(f"Episode {episode + 1} completed in {end_time - start_time:.2f} seconds", flush=True)
-    
+
     return network
 
 
@@ -176,7 +176,7 @@ def evaluate_model(network, num_games=10):
     draws = 0
     losses = 0
     
-    puct = PUCTPlayer(1.0, Gomoku(BOARD_SIZE))
+    puct = PUCTPlayer(1.0, Gomoku(BOARD_SIZE), model_path=None)
     puct.model = network
     mcts = MCTSPlayer(1.0)
     
@@ -220,7 +220,7 @@ def play_game(puct, mcts):
     game = Gomoku(BOARD_SIZE)
 
     while not game.is_game_over():
-        state, best_node = puct.best_move(game, iterations=800)
+        state, best_node = puct.best_move(game, iterations=1600)
         move = state.last_move
         game.make_move(move)
 

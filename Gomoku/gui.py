@@ -22,7 +22,7 @@ class GomokuGUI:
         if game_mode == MCTS:
             self.mcts = MCTSPlayer(exploration_weight=2)
         elif game_mode == PUCT:
-            self.puct_player = PUCTPlayer(exploration_weight=1.4, game=self.game)
+            self.puct_player = PUCTPlayer(exploration_weight=5, game=self.game)
 
         self.cell_size = 40
         self.padding = 20
@@ -177,7 +177,7 @@ class GomokuGUI:
                 self.draw_board()
         # PUCT
         elif self.game_mode == PUCT:
-            state, _ = self.puct_player.best_move(self.game.clone(), iterations=7000)
+            state, _ = self.puct_player.best_move(self.game.clone(), iterations=1600)
             move = state.last_move
             if self.game.make_move(move):
                 self.draw_board()

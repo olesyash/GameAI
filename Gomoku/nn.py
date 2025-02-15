@@ -8,76 +8,105 @@ import os
 import torch.nn as nn
 import torch.nn.functional as F
 
+
+
+def conv3x3(in_channels, out_channels, stride=1):
+    # 3x3 convolution
+    return nn.Conv2d(in_channels, out_channels, kernel_size=3,
+                     stride=stride, padding=1, bias=False)
+
+class ResidualBlock(nn.Module):
+    # Residual block
+    def __init__(self, in_channels, out_channels, stride=1):
+        super(ResidualBlock, self).__init__()
+        self.conv1 = conv3x3(in_channels, out_channels, stride)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU(inplace=True)
+
+        self.conv2 = conv3x3(out_channels, out_channels)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+
+        self.downsample = False
+        if in_channels != out_channels or stride != 1:
+            self.downsample = True
+            self.downsample_conv = conv3x3(in_channels, out_channels, stride=stride)
+            self.downsample_bn = nn.BatchNorm2d(out_channels)
+
+    def forward(self, x):
+        residual = x
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        if self.downsample:
+            residual = self.downsample_conv(residual)
+            residual = self.downsample_bn(residual)
+
+        out += residual
+        out = self.relu(out)
+        return out
+
+
 class GameNetwork(nn.Module):
-    def __init__(self, board_size, device, learning_rate=0.0001):
+    def __init__(self, board_size, device, learning_rate=0.0001, weight_decay=0.0001):
         super().__init__()
         self.board_size = board_size
         self.device = device
+        num_layers = 4
+        num_channels = 256
+        n = board_size
+        action_size = n ** 2
 
-        # Define network layers
-        self.conv_input = nn.Conv2d(4, 256, 3, padding=1)
-        self.bn_input = nn.BatchNorm2d(256)
+        # residual block
+        res_list = [ResidualBlock(3, num_channels)] + [ResidualBlock(num_channels, num_channels) for _ in
+                                                       range(num_layers - 1)]
+        self.res_layers = nn.Sequential(*res_list)
 
-        # Dropout to prevent overfitting (20% probability)
-        self.dropout = nn.Dropout(p=0.2)
+        # policy head
+        self.p_conv = nn.Conv2d(num_channels, 4, kernel_size=1, padding=0, bias=False)
+        self.p_bn = nn.BatchNorm2d(num_features=4)
+        self.relu = nn.ReLU(inplace=True)
 
-        # Residual layers
-        self.residual_layers = nn.ModuleList([
-            nn.Sequential(
-                nn.Conv2d(256, 256, 3, padding=1),
-                nn.BatchNorm2d(256),
-                nn.ReLU(),
-                nn.Conv2d(256, 256, 3, padding=1),
-                nn.BatchNorm2d(256)
-            ) for _ in range(3)
-        ])
+        self.p_fc = nn.Linear(4 * n ** 2, action_size)
+        self.log_softmax = nn.LogSoftmax(dim=1)
 
-        # Policy and value heads
-        self.policy_conv = nn.Conv2d(256, 2, 1)
-        self.policy_bn = nn.BatchNorm2d(2)
-        self.policy_fc = nn.Linear(2 * board_size * board_size, board_size * board_size)
+        # value head
+        self.v_conv = nn.Conv2d(num_channels, 2, kernel_size=1, padding=0, bias=False)
+        self.v_bn = nn.BatchNorm2d(num_features=2)
 
-        self.value_conv = nn.Conv2d(256, 1, 1)
-        self.value_bn = nn.BatchNorm2d(1)
-        self.value_fc1 = nn.Linear(board_size * board_size, 256)
-        self.value_fc2 = nn.Linear(256, 1)
+        self.v_fc1 = nn.Linear(2 * n ** 2, 256)
+        self.v_fc2 = nn.Linear(256, 1)
+        self.tanh = nn.Tanh()
 
-        # Optimizer and scheduler
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
+        self.optimizer = torch.optim.AdamW(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=50, gamma=0.95)
 
     def forward(self, x):
         """Forward pass through the network."""
-        if len(x.shape) == 3:
-            x = x.unsqueeze(0)
+        # residual block
+        out = self.res_layers(x)
 
-        # Initial convolution
-        x = F.relu(self.bn_input(self.conv_input(x)))
+        # policy head
+        p = self.p_conv(out)
+        p = self.p_bn(p)
+        p = self.relu(p)
 
-        # Apply dropout after the first convolution
-        x = self.dropout(x)
+        p = self.p_fc(p.view(p.size(0), -1))
+        p = self.log_softmax(p)
 
-        # Residual layers with dropout
-        for layer in self.residual_layers:
-            residual = x
-            x = layer(x)
-            x = self.dropout(x)  # Apply dropout after each residual block
-            x += residual
-            x = F.relu(x)
+        # value head
+        v = self.v_conv(out)
+        v = self.v_bn(v)
+        v = self.relu(v)
 
-        # Policy head
-        policy = F.relu(self.policy_bn(self.policy_conv(x)))
-        policy = policy.reshape(-1, 2 * self.board_size * self.board_size)
-        policy = self.policy_fc(policy)
+        v = self.v_fc1(v.view(v.size(0), -1))
+        v = self.relu(v)
+        v = self.v_fc2(v)
+        v = self.tanh(v)
 
-        # Value head
-        value = F.relu(self.value_bn(self.value_conv(x)))
-        value = value.reshape(-1, self.board_size * self.board_size)
-        value = F.relu(self.value_fc1(value))
-        value = torch.tanh(self.value_fc2(value))
-
-        return policy, value
-
+        return p, v
 
     def predict(self, state):
         """Get policy and value predictions for a game state
@@ -93,13 +122,19 @@ class GameNetwork(nn.Module):
         # Prepare state for neural network
         self.eval()
         board_tensor = state.encode().to(self.device)
+        # board_tensor = board_tensor.unsqueeze(0)  # Add batch dimension
         
         # Get policy and value predictions
         with torch.no_grad():
             policy, value = self.forward(board_tensor)
+
+            # Convert to probabilities because log_softmax returns log probabilities
+            policy = torch.exp(policy)
+
             # Ensure policy is 1D array of correct size
             if isinstance(policy, torch.Tensor):
                 policy = policy.cpu().numpy()
+
             if len(policy.shape) == 2:
                 policy = policy[0]  # Take first item from batch
             # Ensure value is a scalar
@@ -136,10 +171,10 @@ class GameNetwork(nn.Module):
         """
         if os.path.exists(path):
             state = torch.load(path, map_location=self.device)
-            if state['board_size'] != self.board_size:
-                raise ValueError(f"Model board size ({state['board_size']}) does not match current board size ({self.board_size})")
-            self.load_state_dict(state['state_dict'])
-            print(f"Loaded model version {state.get('model_version', '1.0')} from {path}")
+            # if state['board_size'] != self.board_size:
+            #     raise ValueError(f"Model board size ({state['board_size']}) does not match current board size ({self.board_size})")
+            # self.load_state_dict(state['state_dict'])
+            # print(f"Loaded model version {state.get('model_version', '1.0')} from {path}")
         else:
             print(f"No saved model found at {path}")
     

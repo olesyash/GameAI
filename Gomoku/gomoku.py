@@ -271,32 +271,28 @@ class Gomoku:
             torch.Tensor: Three-channel tensor representing the board state:
                 - Channel 1: Current player's moves (1 where current player has moved, 0 elsewhere)
                 - Channel 2: Opponent's moves (1 where opponent has moved, 0 elsewhere)
-                - Channel 3: Valid moves mask (1 for empty/legal positions, 0 for occupied/illegal)
+                - Channel 3: Last move (1 at the position of the last move, 0 elsewhere)
         """
-        current_player = self.get_current_player()
         board_size = len(self.board)
+        current_player = self.next_player
         
-        # Create three channels
-        current_player_channel = torch.zeros((board_size, board_size))
-        opponent_channel = torch.zeros((board_size, board_size))
-        valid_moves_channel = torch.ones((board_size, board_size))  # Start with all moves valid
+        # Create channels with proper batch dimension
+        channels = torch.zeros((1, 3, board_size, board_size))
         
-        # Fill the channels based on the board state
+        # Fill first two channels (current player and opponent)
         for i in range(board_size):
             for j in range(board_size):
                 if self.board[i][j] == current_player:
-                    current_player_channel[i][j] = 1
-                    valid_moves_channel[i][j] = 0  # Position is taken
-                elif self.board[i][j] != 0:  # If it's not empty and not current player, it's opponent
-                    opponent_channel[i][j] = 1
-                    valid_moves_channel[i][j] = 0  # Position is taken
+                    channels[0, 0, i, j] = 1
+                elif self.board[i][j] == -current_player:
+                    channels[0, 1, i, j] = 1
         
-        # Compute threat matrix
-        threat_matrix = self.compute_threat_matrix(self.board)
-
-        # Stack all input channels together
-        board_tensor = torch.tensor(np.stack([current_player_channel, opponent_channel, valid_moves_channel, threat_matrix]), dtype=torch.float32)
-        return board_tensor
+        # Add last move to third channel
+        if self.last_move is not None:
+            last_x, last_y = self.last_move
+            channels[0, 2, last_x, last_y] = 1
+        
+        return channels
 
     def decode(self, value):
         """ Decode the value from vector(-1, 1) to actual value 0,1,-1

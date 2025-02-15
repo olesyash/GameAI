@@ -1,3 +1,4 @@
+import math
 from copy import deepcopy
 import random
 import matplotlib.pyplot as plt
@@ -10,6 +11,7 @@ import torch.nn.functional as F
 from gomoku import Gomoku, BOARD_SIZE, BOARD_TENSOR, POLICY_PROBS, STATUS
 import time
 import os
+BEST_MODEL_PATH = os.path.join("models", "best_checkpoint.pt")
 
 
 class PUCTNode:
@@ -24,8 +26,9 @@ class PUCTNode:
 
     def get_puct(self, exploration_weight):
         """Get the PUCT value of the node."""
-        puct = self.Q + exploration_weight * self.P * (self.parent.N ** 0.5) / (1 + self.N)
-        return puct
+        q_value = self.Q / (self.N + 1e-8)
+        u_value = exploration_weight * self.P * math.sqrt(self.parent.N) / (1 + self.N)
+        return q_value + u_value
 
     def best_child(self, exploration_weight):
         """Select the child node with the highest PUCT value."""
@@ -40,7 +43,7 @@ class PUCTNode:
 
 
 class PUCTPlayer:
-    def __init__(self, exploration_weight, game, fake_network=False):
+    def __init__(self, exploration_weight, game, fake_network=False, model_path=BEST_MODEL_PATH):
         self.exploration_weight = exploration_weight
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.value_weight = 0.5  # λ in loss function
@@ -49,7 +52,8 @@ class PUCTPlayer:
         else:
             self.model = GameNetwork(board_size=game.board_size, device=self.device)
             self.model.to(self.device)
-        self.model.load_model('models/model_best.pt')
+        if model_path is not None:
+            self.model.load_model(model_path)
 
     def select(self, node):
         """Selection phase: Navigate the tree using UCT."""
@@ -76,7 +80,7 @@ class PUCTPlayer:
     def back_propagate(self, node, value):
         while node is not None:
             node.N += 1  # Increment the visit count
-            node.Q += (1/node.N) * (value - node.Q)  # Update the value
+            node.Q = (node.N * node.Q + value) / (node.N + 1) # Update the value
             node = node.parent
             value = -value
 
