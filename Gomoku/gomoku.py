@@ -25,6 +25,7 @@ class Gomoku:
             board_size (int): Size of the board (default: 15x15)
         """
         self.board_size = board_size
+        self.win_count = WIN_COUNT
         self.board = np.zeros((board_size, board_size), dtype=int)
         self.next_player = 1  # 1 for black, -1 for white
         self.move_history = []
@@ -268,29 +269,34 @@ class Gomoku:
         """Encode the game state for neural network input.
         
         Returns:
-            torch.Tensor: Three-channel tensor representing the board state:
+            torch.Tensor: Four-channel tensor representing the board state:
                 - Channel 1: Current player's moves (1 where current player has moved, 0 elsewhere)
                 - Channel 2: Opponent's moves (1 where opponent has moved, 0 elsewhere)
                 - Channel 3: Last move (1 at the position of the last move, 0 elsewhere)
+                - Channel 4: Current player indicator (all 1s if Black's turn, all 0s if White's turn)
         """
         board_size = len(self.board)
         current_player = self.next_player
         
         # Create channels with proper batch dimension
-        channels = torch.zeros((1, 3, board_size, board_size))
+        channels = torch.zeros((4, board_size, board_size))
         
         # Fill first two channels (current player and opponent)
         for i in range(board_size):
             for j in range(board_size):
                 if self.board[i][j] == current_player:
-                    channels[0, 0, i, j] = 1
+                    channels[0, i, j] = 1
                 elif self.board[i][j] == -current_player:
-                    channels[0, 1, i, j] = 1
+                    channels[1, i, j] = 1
         
         # Add last move to third channel
         if self.last_move is not None:
             last_x, last_y = self.last_move
-            channels[0, 2, last_x, last_y] = 1
+            channels[2, last_x, last_y] = 1
+        
+        # Add current player indicator channel (1s for Black, 0s for White)
+        if current_player == BLACK:  # BLACK = 1
+            channels[3] = torch.ones((board_size, board_size))
         
         return channels
 

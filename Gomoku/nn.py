@@ -49,6 +49,30 @@ class ResidualBlock(nn.Module):
         return out
 
 
+
+class AlphaLoss(nn.Module):
+    """
+    Custom loss as defined in the paper :
+    (z - v) ** 2 --> MSE Loss
+    (-pi * logp) --> Cross Entropy Loss
+    z : self_play_winner
+    v : winner
+    pi : self_play_probas
+    p : probas
+
+    The loss is then averaged over the entire batch
+    """
+
+    def __init__(self):
+        super(AlphaLoss, self).__init__()
+
+    def forward(self, log_ps, vs, target_ps, target_vs):
+        value_loss = torch.mean(torch.pow(vs - target_vs, 2))
+        policy_loss = -torch.mean(torch.sum(target_ps * log_ps, 1))
+
+        return value_loss + policy_loss
+
+
 class GameNetwork(nn.Module):
     def __init__(self, board_size, device, learning_rate=0.0001, weight_decay=0.0001):
         super().__init__()
@@ -59,8 +83,8 @@ class GameNetwork(nn.Module):
         n = board_size
         action_size = n ** 2
 
-        # residual block
-        res_list = [ResidualBlock(3, num_channels)] + [ResidualBlock(num_channels, num_channels) for _ in
+        # residual block - updated input channels from 3 to 4
+        res_list = [ResidualBlock(4, num_channels)] + [ResidualBlock(num_channels, num_channels) for _ in
                                                        range(num_layers - 1)]
         self.res_layers = nn.Sequential(*res_list)
 
@@ -82,6 +106,7 @@ class GameNetwork(nn.Module):
 
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=50, gamma=0.95)
+        self.alpha_loss = AlphaLoss()
 
     def forward(self, x):
         """Forward pass through the network."""
@@ -122,7 +147,7 @@ class GameNetwork(nn.Module):
         # Prepare state for neural network
         self.eval()
         board_tensor = state.encode().to(self.device)
-        # board_tensor = board_tensor.unsqueeze(0)  # Add batch dimension
+        board_tensor = board_tensor.unsqueeze(0)  # Add batch dimension
         
         # Get policy and value predictions
         with torch.no_grad():
@@ -171,12 +196,15 @@ class GameNetwork(nn.Module):
         """
         if os.path.exists(path):
             state = torch.load(path, map_location=self.device)
-            # if state['board_size'] != self.board_size:
-            #     raise ValueError(f"Model board size ({state['board_size']}) does not match current board size ({self.board_size})")
-            # self.load_state_dict(state['state_dict'])
-            # print(f"Loaded model version {state.get('model_version', '1.0')} from {path}")
+            if state['board_size'] != self.board_size:
+                raise ValueError(f"Model board size ({state['board_size']}) does not match current board size ({self.board_size})")
+            self.load_state_dict(state['state_dict'])
+            print(f"Loaded model version {state.get('model_version', '1.0')} from {path}")
         else:
             print(f"No saved model found at {path}")
+    
+
+
     
     def train_step(self, state_tensor, policy_tensor, value_tensor):
         """Perform a single training step with debugging for NaN values."""
@@ -190,23 +218,7 @@ class GameNetwork(nn.Module):
             print(" WARNING: NaN detected in forward pass!")
             return float('nan')  # Prevents corrupt training updates
 
-        # Normalize policy logits before softmax
-        predicted_policy = F.softmax(predicted_policy / torch.norm(predicted_policy, p=2, dim=-1, keepdim=True), dim=-1)
-
-        # Compute losses
-        policy_loss = F.cross_entropy(predicted_policy, policy_tensor.to(self.device))
-        value_loss = F.mse_loss(predicted_value.squeeze(), value_tensor.float().to(self.device))
-
-        # Debugging: Check for NaN in loss
-        if torch.isnan(policy_loss).any() or torch.isnan(value_loss).any():
-            print(" WARNING: NaN detected in loss!")
-            return float('nan')
-
-        # Apply weighted loss
-        policy_weight = 0.7
-        value_weight = 0.3
-        loss = policy_weight * policy_loss + value_weight * value_loss
-
+        loss = self.alpha_loss(predicted_policy, predicted_value, policy_tensor, value_tensor)
         # Backward pass
         self.optimizer.zero_grad()
         loss.backward()

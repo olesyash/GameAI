@@ -20,9 +20,11 @@ class GomokuGUI:
         
         # Initialize players based on game mode
         if game_mode == MCTS:
-            self.mcts = MCTSPlayer(exploration_weight=2)
+            self.mcts = MCTSPlayer(exploration_weight=1)
         elif game_mode == PUCT:
-            self.puct_player = PUCTPlayer(exploration_weight=5, game=self.game)
+            # Create a separate game instance for PUCT player
+            puct_game = Gomoku()
+            self.puct_player = PUCTPlayer(exploration_weight=1, game=puct_game)
 
         self.cell_size = 40
         self.padding = 20
@@ -172,7 +174,7 @@ class GomokuGUI:
         # Perform AI move
         # MCTS
         if self.game_mode == MCTS:
-            best_node, _ = self.mcts.search(self.game.clone(), iterations=7000)
+            best_node, _ = self.mcts.search(self.game.clone(), iterations=800)
             if self.game.make_move(best_node.state.last_move):
                 self.draw_board()
         # PUCT
@@ -200,9 +202,11 @@ class GomokuGUI:
         
         # Reinitialize AI player if needed
         if self.game_mode == MCTS:
-            self.ai_player = MCTSPlayer(exploration_weight=1.4)
+            self.mcts = MCTSPlayer(exploration_weight=1.4)
         elif self.game_mode == PUCT:
-            self.ai_player = PUCTPlayer(exploration_weight=1.4, game=self.game)
+            # Create a separate game instance for PUCT player
+            puct_game = Gomoku()
+            self.puct_player = PUCTPlayer(exploration_weight=1, game=puct_game)
 
     def undo_move(self):
         """Undo the last move."""

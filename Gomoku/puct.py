@@ -12,6 +12,7 @@ from gomoku import Gomoku, BOARD_SIZE, BOARD_TENSOR, POLICY_PROBS, STATUS
 import time
 import os
 BEST_MODEL_PATH = os.path.join("models", "model_best.pt")
+TIC_TAC_TOE = os.path.join("models", "tic_tac_toe.pt")
 
 
 class PUCTNode:
@@ -53,7 +54,10 @@ class PUCTPlayer:
             self.model = GameNetwork(board_size=game.board_size, device=self.device)
             self.model.to(self.device)
         if model_path is not None:
-            self.model.load_model(model_path)
+            if game.board_size == 3 and game.win_count == 3:
+                self.model.load_model(TIC_TAC_TOE)
+            else:
+                self.model.load_model(model_path)
 
     def select(self, node):
         """Selection phase: Navigate the tree using UCT."""
@@ -107,7 +111,19 @@ class PUCTPlayer:
     def choose_best_move(self, root_node):
         if not root_node.children:
             return None
-        best_child = max(root_node.children, key=lambda child: child.N)
+            
+        # Find the maximum number of visits among all children
+        max_n = max(child.N for child in root_node.children)
+        
+        # Get all children with the maximum number of visits
+        most_visited = [child for child in root_node.children if child.N == max_n]
+        
+        # If there are multiple children with same N, use P as tiebreaker
+        if len(most_visited) > 1:
+            best_child = max(most_visited, key=lambda child: child.P)
+        else:
+            best_child = most_visited[0]
+            
         return best_child.state
 
     def add_dirichlet_noise(self, probs, legal_moves, alpha=0.03, epsilon=0.25):

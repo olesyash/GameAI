@@ -26,9 +26,7 @@ def train_model():
 
     # Training parameters
 
-
-
-    num_episodes = 100
+    num_episodes = 1000
     losses = []
 
     # Keep track of best model
@@ -49,22 +47,30 @@ def train_model():
 
     for episode in range(num_episodes):
         start_time = time.time()
-        exploration_weight = 1.4
+        # Randomly vary exploration weights for both players
+        base_exploration_weight = 1.4
+        exploration_weight1 = base_exploration_weight * np.random.uniform(0.8, 1.2)  # ±20% variation
+        exploration_weight2 = base_exploration_weight * np.random.uniform(0.8, 1.2)  # ±20% variation
 
         game = Gomoku(board_size=BOARD_SIZE)
         states_this_game = []  # Store all states in this game
         policies_this_game = []  # Store MCTS policies for each state
+        values_this_game = []   # Store Q-values from MCTS
 
-
-        # Create MCTS player
-        mcts1 = MCTSPlayer(exploration_weight)
-        mcts2 = MCTSPlayer(exploration_weight)
+        # Create MCTS players with different exploration weights
+        mcts1 = MCTSPlayer(exploration_weight1)
+        mcts2 = MCTSPlayer(exploration_weight2)
 
         # Play one game
         while not game.is_game_over():
 
             # Get move from MCTS
             best_node1, root1 = mcts1.search(game, iterations=7000)
+
+            # Store state and Q-value from MCTS (from Black's perspective)
+            current_state = game.clone()
+            states_this_game.append(current_state)
+            values_this_game.append(root1.value / max(1, root1.visits))  # Normalize value
 
             # Make the move
             move1 = best_node1.state.last_move
@@ -82,10 +88,16 @@ def train_model():
 
             policies_this_game.append(policy)
 
+            if game.is_game_over():
+                break
+
+            # Get move from MCTS for player 2
+            best_node2, root2 = mcts2.search(game, iterations=7000)
+
+            # Store state and Q-value from MCTS
             current_state = game.clone()
             states_this_game.append(current_state)
-
-            best_node2, root2 = mcts2.search(game, iterations=7000)
+            values_this_game.append(root2.value / max(1, root2.visits))  # Normalize value
 
             # Make the move
             move2 = best_node2.state.last_move
@@ -103,19 +115,14 @@ def train_model():
 
             policies_this_game.append(policy)
 
-            current_state = game.clone()
-            states_this_game.append(current_state)
-
-
-        # Get game result
+        # Get game result (just for logging)
         winner = game.get_winner()
         print(f"Episode {episode + 1}, Winner: {'Black' if winner == 1 else 'White' if winner == -1 else 'Draw'}", flush=True)
 
+        # Extend training data with this game's data
         all_states.extend(states_this_game)
         all_policies.extend(policies_this_game)
-        all_values.extend([1 if winner == 1 else -1 if winner == -1 else 0] * len(states_this_game))
-
-        batch_size = 64  # Instead of 32 or 64
+        all_values.extend(values_this_game)  # Use MCTS Q-values instead of winner
 
         # Train once on collected data
         avg_loss = 0  # Track batch loss
@@ -123,21 +130,51 @@ def train_model():
             print("Warning: No training data available! Skipping training.")
             return network  # Exit training early
 
-        num_batches = max(1, len(all_states) // batch_size)  # Ensure denominator is not zero
+        # Convert to numpy arrays for efficient shuffling
+        states_array = np.array(all_states)
+        policies_array = np.array(all_policies)
+        values_array = np.array(all_values)
+        
+        batch_size = min(64, len(states_array))  # Ensure batch size isn't larger than dataset
+        if batch_size == 0:
+            print("Warning: No data to train on! Skipping training.")
+            return network
 
-        for batch_idx in range(0, len(all_states), batch_size):
-            end_idx = min(batch_idx + batch_size, len(all_states))
-            batch_indices = range(batch_idx, end_idx)
-
-            # Create batch tensors
-            state_batch = torch.stack([all_states[idx].encode().to(device) for idx in batch_indices])
-            policy_batch = torch.stack([torch.from_numpy(all_policies[idx]).float().to(device) for idx in batch_indices])
-            value_batch = torch.tensor([all_values[idx] for idx in batch_indices], dtype=torch.float32, device=device)
-
-            # Perform a training step with the entire batch
-            batch_loss = network.train_step(state_batch, policy_batch, value_batch)
-            avg_loss += batch_loss / num_batches  # Use corrected denominator
-
+        num_epochs = 3  # Number of times to shuffle and train on all data
+        num_batches = max(1, len(states_array) // batch_size)  # At least 1 batch
+        total_batches = num_batches * num_epochs
+        
+        # Train for multiple epochs, shuffling data each time
+        for epoch in range(num_epochs):
+            # Shuffle all arrays using the same permutation
+            shuffle_indices = np.random.permutation(len(states_array))
+            shuffled_states = states_array[shuffle_indices]
+            shuffled_policies = policies_array[shuffle_indices]
+            shuffled_values = values_array[shuffle_indices]
+            
+            epoch_loss = 0
+            
+            for batch_idx in range(num_batches):
+                start_idx = batch_idx * batch_size
+                end_idx = min(start_idx + batch_size, len(shuffled_states))  # Ensure we don't go past array bounds
+                
+                # Skip empty batches
+                if end_idx <= start_idx:
+                    continue
+                
+                # Create batch tensors from shuffled arrays
+                state_batch = torch.stack([shuffled_states[i].encode().to(device) for i in range(start_idx, end_idx)])
+                policy_batch = torch.stack([torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)])
+                value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
+                
+                # Perform a training step with the batch
+                batch_loss = network.train_step(state_batch, policy_batch, value_batch)
+                epoch_loss += batch_loss
+            
+            if num_batches > 0:  # Only update loss if we had batches
+                avg_loss += epoch_loss / total_batches
+                print(f"Episode {episode+1}, Epoch {epoch+1}/{num_epochs}, Loss: {epoch_loss/num_batches:.4f}", flush=True)
+        
         losses.append(avg_loss)  # Store loss
 
         print(f"Episode {episode+1}, Average Loss: {avg_loss:.4f}", flush=True)
@@ -151,15 +188,9 @@ def train_model():
         if (episode + 1) % evaluation_frequency == 0:
             print(f"\nEvaluating model after episode {episode + 1}...", flush=True)
             win_rate = evaluate_model(network)
-            print('policy')
-            for policy in policies_this_game:
-                print(policy)
-            print('states')
-            for state in states_this_game:
-                print(state)
 
             # Save if it's the best model so far
-            if win_rate > best_win_rate:
+            if win_rate >= best_win_rate:
                 best_win_rate = win_rate
                 network.save_model("models/model_best.pt")
                 print(f"New best model saved! Win rate: {win_rate:.2%}", flush=True)
@@ -181,7 +212,11 @@ def evaluate_model(network, num_games=10):
     mcts = MCTSPlayer(1.0)
     
     for game_idx in range(num_games):
-        winner = play_game(puct, mcts)
+        if game_idx % 2 == 0:
+            winner = play_game1(puct, mcts)
+        else:
+            winner = play_game2(puct, mcts)
+
         if winner == 1:  # PUCT wins
             wins += 1
         elif winner == -1:  # MCTS wins
@@ -215,21 +250,42 @@ def plot_training_loss(losses):
         print(f"Loss plot saved to: {os.path.abspath(save_path)}", flush=True)
 
 
-def play_game(puct, mcts):
+def play_game1(puct, mcts):
     """Play a game between two players or against self"""
     game = Gomoku(BOARD_SIZE)
 
     while not game.is_game_over():
         state, best_node = puct.best_move(game, iterations=1600)
         move = state.last_move
+        print(f"puct move: {move}")
         game.make_move(move)
 
         best_node, root = mcts.search(game, iterations=800)
         move = best_node.state.last_move
+        print(f"mcts move: {move}")
         game.make_move(move)
 
     return game.get_winner()
 
+
+def play_game2(puct, mcts):
+    """Play a game between two players or against self"""
+    game = Gomoku(BOARD_SIZE)
+
+    while not game.is_game_over():
+        best_node, root = mcts.search(game, iterations=800)
+        move = best_node.state.last_move
+        print(f"mcts move: {move}")
+        game.make_move(move)
+
+        state, best_node = puct.best_move(game, iterations=1600)
+        if not state:
+            break
+        move = state.last_move
+        print(f"puct move: {move}")
+        game.make_move(move)
+
+    return game.get_winner()
 
 def print_board(board):
     """Print the game board in a readable format"""
