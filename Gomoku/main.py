@@ -8,6 +8,9 @@ import os
 from MCTS import MCTSPlayer
 import time
 
+MCTS_ITERATIONS = 4000
+PUCT_ITERATIONS = 7000
+
 
 def train_model():
     # Initialize game and network
@@ -26,12 +29,12 @@ def train_model():
 
     # Training parameters
 
-    num_episodes = 1000
+    num_episodes = 10000
     losses = []
 
     # Keep track of best model
     best_win_rate = 0.0
-    evaluation_frequency = 20  # Evaluate every 50 episodes
+    evaluation_frequency = 50  # Evaluate every 50 episodes
 
     # Store all training data
     all_states = []
@@ -65,7 +68,7 @@ def train_model():
         while not game.is_game_over():
 
             # Get move from MCTS
-            best_node1, root1 = mcts1.search(game, iterations=7000)
+            best_node1, root1 = mcts1.search(game, iterations=MCTS_ITERATIONS)
 
             # Store state and Q-value from MCTS (from Black's perspective)
             current_state = game.clone()
@@ -92,7 +95,7 @@ def train_model():
                 break
 
             # Get move from MCTS for player 2
-            best_node2, root2 = mcts2.search(game, iterations=7000)
+            best_node2, root2 = mcts2.search(game, iterations=MCTS_ITERATIONS)
 
             # Store state and Q-value from MCTS
             current_state = game.clone()
@@ -255,12 +258,12 @@ def play_game1(puct, mcts):
     game = Gomoku(BOARD_SIZE)
 
     while not game.is_game_over():
-        state, best_node = puct.best_move(game, iterations=1600)
+        state, best_node = puct.best_move(game, iterations=PUCT_ITERATIONS)
         move = state.last_move
         print(f"puct move: {move}")
         game.make_move(move)
 
-        best_node, root = mcts.search(game, iterations=800)
+        best_node, root = mcts.search(game, iterations=MCTS_ITERATIONS)
         move = best_node.state.last_move
         print(f"mcts move: {move}")
         game.make_move(move)
@@ -273,12 +276,12 @@ def play_game2(puct, mcts):
     game = Gomoku(BOARD_SIZE)
 
     while not game.is_game_over():
-        best_node, root = mcts.search(game, iterations=800)
+        best_node, root = mcts.search(game, iterations=MCTS_ITERATIONS)
         move = best_node.state.last_move
         print(f"mcts move: {move}")
         game.make_move(move)
 
-        state, best_node = puct.best_move(game, iterations=1600)
+        state, best_node = puct.best_move(game, iterations=PUCT_ITERATIONS)
         if not state:
             break
         move = state.last_move
