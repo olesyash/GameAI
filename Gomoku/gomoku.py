@@ -82,7 +82,7 @@ class Gomoku:
             return False
 
         self.board[row, col] = self.next_player
-        self.move_history.append((row, col))
+        self.move_history.append(((row, col), self.next_player))
         self.last_move = (row, col)
 
         # Check for win
@@ -104,8 +104,8 @@ class Gomoku:
         if not self.move_history:
             return False
 
-        row, col = self.move_history.pop()
-        self.last_move = self.move_history[-1] if self.move_history else None
+        (row, col), player = self.move_history.pop()
+        self.last_move = self.move_history[-1][0:2] if self.move_history else None
         self.board[row, col] = 0
         self.switch_player()
         self.status = ONGOING
@@ -265,23 +265,27 @@ class Gomoku:
 
         return threat_matrix
 
-    def encode(self):
+    def encode(self, n_history=3):
         """Encode the game state for neural network input.
         
+        Args:
+            n_history (int): Number of past moves to include for each player
+        
         Returns:
-            torch.Tensor: Four-channel tensor representing the board state:
+            torch.Tensor: Multi-channel tensor representing the board state:
                 - Channel 1: Current player's moves (1 where current player has moved, 0 elsewhere)
                 - Channel 2: Opponent's moves (1 where opponent has moved, 0 elsewhere)
-                - Channel 3: Last move (1 at the position of the last move, 0 elsewhere)
-                - Channel 4: Current player indicator (all 1s if Black's turn, all 0s if White's turn)
+                - Channels 3 to N+2: Last N moves of current player (most recent first)
+                - Channels N+3 to 2N+2: Last N moves of opponent (most recent first)
+                - Channel 2N+3: Current player indicator (all 1s if Black's turn, all 0s if White's turn)
         """
         board_size = len(self.board)
         current_player = self.next_player
         
-        # Create channels with proper batch dimension
-        channels = torch.zeros((4, board_size, board_size))
+        # Create channels with proper dimensions: 2 for current state + 2N for move history + 1 for player indicator
+        channels = torch.zeros((2 * n_history + 3, board_size, board_size))
         
-        # Fill first two channels (current player and opponent)
+        # Fill first two channels (current player and opponent positions)
         for i in range(board_size):
             for j in range(board_size):
                 if self.board[i][j] == current_player:
@@ -289,14 +293,31 @@ class Gomoku:
                 elif self.board[i][j] == -current_player:
                     channels[1, i, j] = 1
         
-        # Add last move to third channel
-        if self.last_move is not None:
-            last_x, last_y = self.last_move
-            channels[2, last_x, last_y] = 1
+        # Add move history channels
+        if hasattr(self, 'move_history') and self.move_history:
+            current_moves = []
+            opponent_moves = []
+            
+            # Separate moves by player
+            for move, player in reversed(self.move_history):
+                if player == current_player:
+                    current_moves.append(move)
+                else:
+                    opponent_moves.append(move)
+            
+            # Fill current player's move history
+            for i, move in enumerate(current_moves[:n_history]):
+                x, y = move
+                channels[2 + i, x, y] = 1
+            
+            # Fill opponent's move history
+            for i, move in enumerate(opponent_moves[:n_history]):
+                x, y = move
+                channels[2 + n_history + i, x, y] = 1
         
         # Add current player indicator channel (1s for Black, 0s for White)
         if current_player == BLACK:  # BLACK = 1
-            channels[3] = torch.ones((board_size, board_size))
+            channels[-1] = torch.ones((board_size, board_size))
         
         return channels
 

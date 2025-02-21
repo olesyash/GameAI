@@ -74,7 +74,16 @@ class AlphaLoss(nn.Module):
 
 
 class GameNetwork(nn.Module):
-    def __init__(self, board_size, device, learning_rate=0.0001, weight_decay=0.0001):
+    def __init__(self, board_size, device, n_history=3, learning_rate=0.0001, weight_decay=0.0001):
+        """Initialize the neural network.
+        
+        Args:
+            board_size (int): Size of the game board
+            device (torch.device): Device to run the network on
+            n_history (int): Number of historical moves to include for each player
+            learning_rate (float): Learning rate for optimization
+            weight_decay (float): Weight decay for regularization
+        """
         super().__init__()
         self.board_size = board_size
         self.device = device
@@ -82,9 +91,12 @@ class GameNetwork(nn.Module):
         num_channels = 256
         n = board_size
         action_size = n ** 2
-
-        # residual block - updated input channels from 3 to 4
-        res_list = [ResidualBlock(4, num_channels)] + [ResidualBlock(num_channels, num_channels) for _ in
+        
+        # Calculate input channels: 2 for current state + 2*n_history for move history + 1 for player
+        input_channels = 2 + (2 * n_history) + 1
+        
+        # residual block with parameterized input channels
+        res_list = [ResidualBlock(input_channels, num_channels)] + [ResidualBlock(num_channels, num_channels) for _ in
                                                        range(num_layers - 1)]
         self.res_layers = nn.Sequential(*res_list)
 

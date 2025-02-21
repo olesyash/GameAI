@@ -18,7 +18,8 @@ def train_model():
     print(f"Using device: {device}", flush=True)
 
     learning_rate = 0.001
-    network = GameNetwork(BOARD_SIZE, device, learning_rate=learning_rate)
+    n_history = 3  # Number of historical moves to track
+    network = GameNetwork(BOARD_SIZE, device, n_history=n_history, learning_rate=learning_rate)
     network.to(device)  # Ensure the model is on the correct device
 
     try:
@@ -29,7 +30,7 @@ def train_model():
 
     # Training parameters
 
-    num_episodes = 10000
+    num_episodes = 100
     losses = []
 
     # Keep track of best model
