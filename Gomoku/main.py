@@ -260,21 +260,22 @@ def plot_elo_history(elo_system, save_path="plots/elo_history.png"):
     """Plot ELO rating history of models over training."""
     plt.figure(figsize=(10, 6))
     
-    # Get all model versions
-    models = sorted([name for name in elo_system.history.keys() if name.startswith("Model_")])
+    # Get all model versions except 'Model_Best'
+    models = sorted([name for name in elo_system.history.keys() 
+                    if name.startswith("Model_") and name != "Model_Best"],
+                   key=lambda x: int(x.split("_")[1]))
+    
+    if not models:  # No models to plot yet
+        return
+        
     best_history = elo_system.history["Model_Best"]
     
     # Plot each model's rating
-    episodes = []
-    ratings = []
-    for model in models:
-        episode = int(model.split("_")[1])
-        rating = elo_system.history[model][-1]  # Final rating for this model
-        episodes.append(episode)
-        ratings.append(rating)
+    episodes = [int(model.split("_")[1]) for model in models]
+    ratings = [elo_system.history[model][-1] for model in models]  # Final rating for each model
     
     plt.plot(episodes, ratings, 'b.-', label='Current Model')
-    plt.plot(episodes, best_history[:len(episodes)], 'r.-', label='Best Model')
+    plt.plot(episodes, best_history[-len(episodes):], 'r.-', label='Best Model')
     
     plt.title("ELO Ratings Over Training")
     plt.xlabel("Episode")
@@ -493,11 +494,11 @@ def train_model_vs_itself():
             prev_agent.network = prev_network
             
             print("\nEvaluating current model against previous best...")
-            evaluate_agents(
+            win_rate = evaluate_agents(
                 current_agent, prev_agent,
                 f"Model_{episode + 1}", "Model_Best",
                 num_games=20, board_size=BOARD_SIZE,
-                elo_system=elo_system  # Pass the persistent ELO system
+                elo_system=elo_system
             )
             
             # Get updated ELO ratings
@@ -506,19 +507,13 @@ def train_model_vs_itself():
             
             print(f"ELO Ratings - Current: {current_elo}, Previous Best: {best_elo}")
             
-            # Calculate win rate
-            total_games = 20  # number of evaluation games
-            current_wins = sum(1 for score in elo_system.history[f"Model_{episode + 1}"][-total_games:] 
-                             if score > 0.5)
-            win_rate = current_wins / total_games
-            
-            # Save if new model is significantly better (win rate > 55%)
-            if win_rate > 0.55:
+            # Save if new model is significantly better (win rate > 55% and higher ELO)
+            if win_rate > 0.55 and current_elo > best_elo:
                 elo_improvement = current_elo - best_elo
                 network.save_model("models/model_best.pt")
                 print(f"New best model saved! Win rate: {win_rate:.1%}, ELO improvement: {elo_improvement:.1f}")
             else:
-                print(f"Model not saved. Win rate: {win_rate:.1%} (needs >55% to save)")
+                print(f"Model not saved. Win rate: {win_rate:.1%} (needs >55% and higher ELO to save)")
             
             # Update plots
             if losses:

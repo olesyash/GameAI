@@ -34,7 +34,7 @@ def play_evaluation_game(agent1, agent2, board_size: int = 15) -> Tuple[int, Lis
 
 
 def evaluate_agents(agent1, agent2, agent1_name: str, agent2_name: str,
-                    num_games: int = 100, board_size: int = 15, elo_system: Optional[EloRating] = None) -> None:
+                    num_games: int = 100, board_size: int = 15, elo_system: Optional[EloRating] = None) -> float:
     """Evaluate two agents by playing multiple games and updating their ELO ratings.
     
     Args:
@@ -45,6 +45,9 @@ def evaluate_agents(agent1, agent2, agent1_name: str, agent2_name: str,
         num_games: Number of games to play
         board_size: Size of the Gomoku board
         elo_system: Optional EloRating system to use. If None, creates a new one.
+        
+    Returns:
+        float: Win rate of agent1 (between 0 and 1)
     """
     if elo_system is None:
         elo_system = EloRating()
@@ -105,3 +108,5 @@ def evaluate_agents(agent1, agent2, agent1_name: str, agent2_name: str,
     print(f"Draws: {draws} ({draws / num_games * 100:.1f}%)")
     print(f"Final ratings - {agent1_name}: {elo_system.get_rating(agent1_name)}, "
           f"{agent2_name}: {elo_system.get_rating(agent2_name)}")
+
+    return wins_a / num_games  # Return win rate of agent1
