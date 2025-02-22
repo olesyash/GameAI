@@ -1,5 +1,5 @@
-from Gomoku.elo import EloRating
-from Gomoku.evaluate import evaluate_agents
+from elo import EloRating
+from evaluate import evaluate_agents
 from puct import PUCTPlayer
 import torch
 import numpy as np
