@@ -1,8 +1,10 @@
+from Gomoku.elo import EloRating
+from Gomoku.evaluate import evaluate_agents
 from puct import PUCTPlayer
 import torch
 import numpy as np
 from nn import GameNetwork
-from gomoku import BOARD_SIZE, Gomoku
+from gomoku import BOARD_SIZE, Gomoku, BLACK, WHITE
 import matplotlib.pyplot as plt
 import os
 from MCTS import MCTSPlayer
@@ -30,7 +32,7 @@ def train_model():
 
     # Training parameters
 
-    num_episodes = 100
+    num_episodes = 1000
     losses = []
 
     # Keep track of best model
@@ -200,7 +202,7 @@ def train_model():
                 print(f"New best model saved! Win rate: {win_rate:.2%}", flush=True)
 
             end_time = time.time()
-            print(f"Episode {episode + 1} completed in {end_time - start_time:.2f} seconds", flush=True)
+            print(f"Episode {episode + 1} completed in {end_time - start_time:.2f}  seconds", flush=True)
 
     return network
 
@@ -254,6 +256,39 @@ def plot_training_loss(losses):
         print(f"Loss plot saved to: {os.path.abspath(save_path)}", flush=True)
 
 
+def plot_elo_history(elo_system, save_path="plots/elo_history.png"):
+    """Plot ELO rating history of models over training."""
+    plt.figure(figsize=(10, 6))
+    
+    # Get all model versions
+    models = sorted([name for name in elo_system.history.keys() if name.startswith("Model_")])
+    best_history = elo_system.history["Model_Best"]
+    
+    # Plot each model's rating
+    episodes = []
+    ratings = []
+    for model in models:
+        episode = int(model.split("_")[1])
+        rating = elo_system.history[model][-1]  # Final rating for this model
+        episodes.append(episode)
+        ratings.append(rating)
+    
+    plt.plot(episodes, ratings, 'b.-', label='Current Model')
+    plt.plot(episodes, best_history[:len(episodes)], 'r.-', label='Best Model')
+    
+    plt.title("ELO Ratings Over Training")
+    plt.xlabel("Episode")
+    plt.ylabel("ELO Rating")
+    plt.legend()
+    plt.grid(True)
+    
+    # Create plots directory if it doesn't exist
+    os.makedirs("plots", exist_ok=True)
+    plt.savefig(save_path)
+    plt.close()
+    print(f"ELO history plot saved to: {save_path}")
+
+
 def play_game1(puct, mcts):
     """Play a game between two players or against self"""
     game = Gomoku(BOARD_SIZE)
@@ -299,13 +334,218 @@ def print_board(board):
     print()
 
 
+def train_model_vs_itself():
+    """Train the model using PUCT self-play and evaluate progress using ELO ratings."""
+    # Initialize game and network
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}", flush=True)
+
+    learning_rate = 0.001
+    n_history = 3  # Number of historical moves to track
+    network = GameNetwork(BOARD_SIZE, device, n_history=n_history, learning_rate=learning_rate)
+    network.to(device)  # Ensure the model is on the correct device
+
+    # Initialize ELO rating system
+    elo_system = EloRating()
+
+    try:
+        network.load_model(os.path.join("models", "model_best.pt"))
+        print("Loaded latest model", flush=True)
+    except:
+        print("No existing model found, starting fresh", flush=True)
+
+    # Create a copy of the network for evaluation
+    eval_network = GameNetwork(board_size=BOARD_SIZE, device=device)
+    prev_network = GameNetwork(board_size=BOARD_SIZE, device=device)
+
+    # Training parameters
+    num_episodes = 1000
+    evaluation_frequency = 2  # Evaluate every N episodes
+    puct_iterations = 800  # Number of PUCT iterations per move
+    losses = []
+    
+    # Training statistics
+    total_start_time = time.time()
+    total_games = 0
+    total_moves = 0
+
+    # Initialize replay buffer
+    max_training_data = 10000  # Maximum number of positions to store
+    all_states = []
+    all_policies = []
+    all_values = []
+
+    for episode in range(num_episodes):
+        episode_start_time = time.time()
+        
+        # Create PUCT players with slightly different exploration weights for diversity
+        base_exploration = 1.4
+        exploration1 = base_exploration * np.random.uniform(0.8, 1.2)
+        exploration2 = base_exploration * np.random.uniform(0.8, 1.2)
+        
+
+        game = Gomoku(board_size=BOARD_SIZE)
+        puct1 = PUCTPlayer(exploration1, game)
+        puct1.network = network
+        puct2 = PUCTPlayer(exploration2, game)
+        puct2.network = network
+        states_this_game = []
+        policies_this_game = []
+        values_this_game = []
+        
+        # Play one game
+        while not game.is_game_over():
+            current_puct = puct1 if game.next_player == BLACK else puct2
+            
+            # Get move and root node from PUCT search
+            move, root = current_puct.best_move(game, puct_iterations, is_training=True)
+            
+            if move is None:
+                break
+                
+            # Calculate policy from visit counts
+            board_size = game.board_size
+            policy = np.zeros(board_size * board_size)
+            total_visits = sum(child.N for child in root.children)
+            
+            if total_visits > 0:  # Prevent division by zero
+                for child in root.children:
+                    if child.state.last_move:
+                        move_idx = child.state.last_move[0] * board_size + child.state.last_move[1]
+                        policy[move_idx] = child.N / total_visits
+            
+            # Get value estimate from root node
+            value = root.Q / root.N if root.N > 0 else 0.0
+                
+            # Store state, policy and value
+            states_this_game.append(game.clone())
+            policies_this_game.append(policy)
+            values_this_game.append(value)
+            
+            # Make the move
+            game.make_move(move)
+        
+        # Get game result
+        if game.status == BLACK:
+            game_result = 1.0
+        elif game.status == WHITE:
+            game_result = -1.0
+        else:
+            game_result = 0.0
+            
+        # Update training data
+        all_states.extend(states_this_game)
+        all_policies.extend(policies_this_game)
+        all_values.extend([game_result] * len(states_this_game))
+        
+        # Maintain maximum size of training data
+        if len(all_states) > max_training_data:
+            all_states = all_states[-max_training_data:]
+            all_policies = all_policies[-max_training_data:]
+            all_values = all_values[-max_training_data:]
+
+        # Train on random batch from replay buffer
+        if len(all_states) >= 64:  # Minimum batch size
+            batch_size = min(64, len(all_states))
+            indices = np.random.choice(len(all_states), batch_size, replace=False)
+            
+            # Convert states to tensors
+            batch_states = torch.stack([state.encode() for state in [all_states[i] for i in indices]])
+            
+            # Convert policies to tensors
+            batch_policies = torch.stack([torch.tensor(policy) for policy in [all_policies[i] for i in indices]])
+            batch_policies = batch_policies.to(network.device)
+            
+            # Convert values to tensors
+            batch_values = torch.tensor([all_values[i] for i in indices], dtype=torch.float32)
+            batch_values = batch_values.to(network.device)
+            
+            loss = network.train_step(batch_states, batch_policies, batch_values)
+            losses.append(loss)
+        
+        # Training statistics
+        episode_duration = time.time() - episode_start_time
+        total_duration = time.time() - total_start_time
+        total_games += 1
+        moves_this_game = len(states_this_game)
+        total_moves += moves_this_game
+        
+        # Print progress
+        print(f"\nEpisode {episode + 1}/{num_episodes}")
+        print(f"Duration: {episode_duration:.1f}s ({moves_this_game} moves, {moves_this_game/episode_duration:.1f} moves/s)")
+        print(f"Total training time: {total_duration:.1f} seconds")
+        print(f"Games: {total_games}, Moves: {total_moves}, Avg moves/game: {total_moves/total_games:.1f}")
+        if losses:
+            print(f"Current loss: {losses[-1]:.4f}")
+        
+        # Periodic evaluation and model saving
+        if (episode + 1) % evaluation_frequency == 0:
+            # Save current model state for evaluation
+            eval_network.load_state_dict(network.state_dict())
+            
+            # Load previous best model
+            prev_network.load_model("models/model_best.pt")
+            
+            # Use evaluate.py to play games between current and previous model
+            current_agent = PUCTPlayer(base_exploration, game)
+            current_agent.network = eval_network
+            prev_agent = PUCTPlayer(base_exploration, game)
+            prev_agent.network = prev_network
+            
+            print("\nEvaluating current model against previous best...")
+            evaluate_agents(
+                current_agent, prev_agent,
+                f"Model_{episode + 1}", "Model_Best",
+                num_games=20, board_size=BOARD_SIZE,
+                elo_system=elo_system  # Pass the persistent ELO system
+            )
+            
+            # Get updated ELO ratings
+            current_elo = elo_system.get_rating(f"Model_{episode + 1}")
+            best_elo = elo_system.get_rating("Model_Best")
+            
+            print(f"ELO Ratings - Current: {current_elo}, Previous Best: {best_elo}")
+            
+            # Calculate win rate
+            total_games = 20  # number of evaluation games
+            current_wins = sum(1 for score in elo_system.history[f"Model_{episode + 1}"][-total_games:] 
+                             if score > 0.5)
+            win_rate = current_wins / total_games
+            
+            # Save if new model is significantly better (win rate > 55%)
+            if win_rate > 0.55:
+                elo_improvement = current_elo - best_elo
+                network.save_model("models/model_best.pt")
+                print(f"New best model saved! Win rate: {win_rate:.1%}, ELO improvement: {elo_improvement:.1f}")
+            else:
+                print(f"Model not saved. Win rate: {win_rate:.1%} (needs >55% to save)")
+            
+            # Update plots
+            if losses:
+                plot_training_loss(losses)
+            plot_elo_history(elo_system)
+    
+    return network
+
+
 if __name__ == "__main__":
     # Set random seed for reproducibility
     torch.manual_seed(42)
     
-    # Train the model
-    trained_network = train_model()
+    # Train the model using self-play with PUCT
+    trained_network = train_model_vs_itself()
     
     # Final evaluation
     print("\nFinal model evaluation:", flush=True)
-    final_win_rate = evaluate_model(trained_network, num_games=20)  # More games for final evaluation
+    
+    # Create agents for evaluation
+    final_agent = PUCTPlayer(1.4,
+                                                network=trained_network)
+    best_agent = PUCTPlayer(1.4)  # Best Puct as baseline
+    
+    # Evaluate final model against pure MCTS baseline
+    evaluate_agents(
+        final_agent, best_agent,
+        "Final_Model", "BestPuct_Model",
+        num_games=50, board_size=BOARD_SIZE
+    )

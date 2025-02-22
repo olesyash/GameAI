@@ -199,8 +199,18 @@ class PUCTPlayer:
         
         # Return move based on visit count distribution during training, or best move during evaluation
         if is_training:
+            if not root.children:
+                return None, root
+                
             visit_counts = np.array([child.N for child in root.children])
-            probs = visit_counts / visit_counts.sum()  # normalize to get probabilities
-            chosen_child = np.random.choice(root.children, p=probs)
+            total_visits = visit_counts.sum()
+            
+            if total_visits == 0:
+                # If no visits (shouldn't happen normally), choose randomly
+                chosen_child = np.random.choice(root.children)
+            else:
+                probs = visit_counts / total_visits  # normalize to get probabilities
+                chosen_child = np.random.choice(root.children, p=probs)
+                
             return chosen_child.state.last_move, root
         return self.choose_best_move(root), root
