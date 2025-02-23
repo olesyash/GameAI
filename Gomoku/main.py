@@ -361,7 +361,7 @@ def train_model_vs_itself():
 
     # Training parameters
     num_episodes = 1000
-    evaluation_frequency = 2  # Evaluate every N episodes
+    evaluation_frequency = 20  # Evaluate every N episodes
     puct_iterations = 800  # Number of PUCT iterations per move
     losses = []
 
