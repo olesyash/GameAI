@@ -364,7 +364,7 @@ def train_model_vs_itself():
     evaluation_frequency = 2  # Evaluate every N episodes
     puct_iterations = 800  # Number of PUCT iterations per move
     losses = []
-    
+
     # Training statistics
     total_start_time = time.time()
     total_games = 0
@@ -376,56 +376,57 @@ def train_model_vs_itself():
     all_policies = []
     all_values = []
 
+    game = Gomoku(board_size=BOARD_SIZE)
+    puct1 = PUCTPlayer(1.4, game)
+    puct2 = PUCTPlayer(1.4, game)
     for episode in range(num_episodes):
         episode_start_time = time.time()
-        
+
         # Create PUCT players with slightly different exploration weights for diversity
         base_exploration = 1.4
         exploration1 = base_exploration * np.random.uniform(0.8, 1.2)
         exploration2 = base_exploration * np.random.uniform(0.8, 1.2)
-        
+
 
         game = Gomoku(board_size=BOARD_SIZE)
-        puct1 = PUCTPlayer(exploration1, game)
-        puct1.network = network
-        puct2 = PUCTPlayer(exploration2, game)
-        puct2.network = network
+        puct1.exploration_weight = exploration1
+        puct2.exploration_weight = exploration2
         states_this_game = []
         policies_this_game = []
         values_this_game = []
-        
+
         # Play one game
         while not game.is_game_over():
             current_puct = puct1 if game.next_player == BLACK else puct2
-            
+
             # Get move and root node from PUCT search
             move, root = current_puct.best_move(game, puct_iterations, is_training=True)
-            
+
             if move is None:
                 break
-                
+
             # Calculate policy from visit counts
             board_size = game.board_size
             policy = np.zeros(board_size * board_size)
             total_visits = sum(child.N for child in root.children)
-            
+
             if total_visits > 0:  # Prevent division by zero
                 for child in root.children:
                     if child.state.last_move:
                         move_idx = child.state.last_move[0] * board_size + child.state.last_move[1]
                         policy[move_idx] = child.N / total_visits
-            
+
             # Get value estimate from root node
             value = root.Q / root.N if root.N > 0 else 0.0
-                
+
             # Store state, policy and value
             states_this_game.append(game.clone())
             policies_this_game.append(policy)
             values_this_game.append(value)
-            
+
             # Make the move
             game.make_move(move)
-        
+
         # Get game result
         if game.status == BLACK:
             game_result = 1.0
@@ -433,12 +434,12 @@ def train_model_vs_itself():
             game_result = -1.0
         else:
             game_result = 0.0
-            
+
         # Update training data
         all_states.extend(states_this_game)
         all_policies.extend(policies_this_game)
         all_values.extend([game_result] * len(states_this_game))
-        
+
         # Maintain maximum size of training data
         if len(all_states) > max_training_data:
             all_states = all_states[-max_training_data:]
@@ -449,28 +450,28 @@ def train_model_vs_itself():
         if len(all_states) >= 64:  # Minimum batch size
             batch_size = min(64, len(all_states))
             indices = np.random.choice(len(all_states), batch_size, replace=False)
-            
+
             # Convert states to tensors
             batch_states = torch.stack([state.encode() for state in [all_states[i] for i in indices]])
-            
+
             # Convert policies to tensors
             batch_policies = torch.stack([torch.tensor(policy) for policy in [all_policies[i] for i in indices]])
             batch_policies = batch_policies.to(network.device)
-            
+
             # Convert values to tensors
             batch_values = torch.tensor([all_values[i] for i in indices], dtype=torch.float32)
             batch_values = batch_values.to(network.device)
-            
+
             loss = network.train_step(batch_states, batch_policies, batch_values)
             losses.append(loss)
-        
+
         # Training statistics
         episode_duration = time.time() - episode_start_time
         total_duration = time.time() - total_start_time
         total_games += 1
         moves_this_game = len(states_this_game)
         total_moves += moves_this_game
-        
+
         # Print progress
         print(f"\nEpisode {episode + 1}/{num_episodes}")
         print(f"Duration: {episode_duration:.1f}s ({moves_this_game} moves, {moves_this_game/episode_duration:.1f} moves/s)")
@@ -478,21 +479,21 @@ def train_model_vs_itself():
         print(f"Games: {total_games}, Moves: {total_moves}, Avg moves/game: {total_moves/total_games:.1f}")
         if losses:
             print(f"Current loss: {losses[-1]:.4f}")
-        
+
         # Periodic evaluation and model saving
         if (episode + 1) % evaluation_frequency == 0:
             # Save current model state for evaluation
             eval_network.load_state_dict(network.state_dict())
-            
+
             # Load previous best model
             prev_network.load_model("models/model_best.pt")
-            
+
             # Use evaluate.py to play games between current and previous model
             current_agent = PUCTPlayer(base_exploration, game)
             current_agent.network = eval_network
             prev_agent = PUCTPlayer(base_exploration, game)
             prev_agent.network = prev_network
-            
+
             print("\nEvaluating current model against previous best...")
             win_rate = evaluate_agents(
                 current_agent, prev_agent,
@@ -500,13 +501,13 @@ def train_model_vs_itself():
                 num_games=20, board_size=BOARD_SIZE,
                 elo_system=elo_system
             )
-            
+
             # Get updated ELO ratings
             current_elo = elo_system.get_rating(f"Model_{episode + 1}")
             best_elo = elo_system.get_rating("Model_Best")
-            
+
             print(f"ELO Ratings - Current: {current_elo}, Previous Best: {best_elo}")
-            
+
             # Save if new model is significantly better (win rate > 55% and higher ELO)
             if win_rate > 0.55 and current_elo > best_elo:
                 elo_improvement = current_elo - best_elo
@@ -514,12 +515,12 @@ def train_model_vs_itself():
                 print(f"New best model saved! Win rate: {win_rate:.1%}, ELO improvement: {elo_improvement:.1f}")
             else:
                 print(f"Model not saved. Win rate: {win_rate:.1%} (needs >55% and higher ELO to save)")
-            
+
             # Update plots
             if losses:
                 plot_training_loss(losses)
             plot_elo_history(elo_system)
-    
+
     return network
 
 
