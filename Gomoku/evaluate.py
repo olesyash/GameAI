@@ -21,7 +21,7 @@ def play_evaluation_game(agent1, agent2, board_size: int = 15) -> Tuple[int, Lis
 
     while game.status == ONGOING:  # While game is ongoing
         current_agent = agent1 if game.next_player == BLACK else agent2
-        move, root = current_agent.best_move(game, iterations=800, is_training=False)
+        move, root = current_agent.best_move(game, iterations=1600, is_training=False)
 
         if move is None:
             break  # No valid moves available
@@ -29,7 +29,7 @@ def play_evaluation_game(agent1, agent2, board_size: int = 15) -> Tuple[int, Lis
         game.make_move(move.last_move)  # Pass move as a tuple
         moves.append(move.last_move)
 
-    winner = game.status
+    winner = game.get_winner()
     return winner, moves
 
 
@@ -80,10 +80,10 @@ def evaluate_agents(agent1, agent2, agent1_name: str, agent2_name: str,
                 score = 0.0
                 wins_b += 1
         elif winner == WHITE:  # Second player (WHITE) won
-            if game_num % 2 == 0:  # agent2 was WHITE
+            if game_num % 2 == 0:  # agent1 was BLACK but white won
                 score = 0.0
                 wins_b += 1
-            else:  # agent1 was WHITE
+            else:  # agent2 was BLACK but white won
                 score = 1.0
                 wins_a += 1
         else:  # DRAW

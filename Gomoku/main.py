@@ -516,7 +516,7 @@ def train_model_vs_itself():
             print(f"ELO Ratings - Current: {current_elo}, Previous Best: {best_elo}")
 
             # Save if new model is significantly better (win rate > 55% and higher ELO)
-            if win_rate > 0.55 and current_elo > best_elo:
+            if win_rate > 0.55:
                 elo_improvement = current_elo - best_elo
                 network.save_model("models/model_best.pt")
                 print(f"New best model saved! Win rate: {win_rate:.1%}, ELO improvement: {elo_improvement:.1f}")
