@@ -430,7 +430,7 @@ def train_model_vs_itself():
             # Make the move
             game.make_move(move)
 
-        # Get game result and adjust for player perspective
+        # Get game result without flipping for perspective
         if game.status == BLACK:
             game_result = 1.0
         elif game.status == WHITE:
@@ -438,20 +438,10 @@ def train_model_vs_itself():
         else:
             game_result = 0.0
             
-        # Adjust game result based on player perspective
-        final_values = []
-        for i in range(len(states_this_game)):
-            state = states_this_game[i]
-            # If it's White's turn in this state, negate the result
-            if state.next_player == WHITE:
-                final_values.append(-game_result)
-            else:
-                final_values.append(game_result)
-
-        # Update training data with proper perspective
+        # Update training data
         all_states.extend(states_this_game)
         all_policies.extend(policies_this_game)
-        all_values.extend(final_values)  # Use perspective-adjusted values
+        all_values.extend([game_result] * len(states_this_game))  # Use same result for all states
 
         # Maintain maximum size of training data
         if len(all_states) > max_training_data:
