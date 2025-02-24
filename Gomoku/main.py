@@ -355,10 +355,6 @@ def train_model_vs_itself():
     except:
         print("No existing model found, starting fresh", flush=True)
 
-    # Create a copy of the network for evaluation
-    eval_network = GameNetwork(board_size=BOARD_SIZE, device=device)
-    prev_network = GameNetwork(board_size=BOARD_SIZE, device=device)
-
     # Training parameters
     num_episodes = 1000
     evaluation_frequency = 20  # Evaluate every N episodes
@@ -381,9 +377,9 @@ def train_model_vs_itself():
 
     game = Gomoku(board_size=BOARD_SIZE)
     puct1 = PUCTPlayer(1.4, game)
-    puct1.network = network  # Set the network for player 1
+    puct1.model = network  # Set the network for player 1
     puct2 = PUCTPlayer(1.4, game)
-    puct2.network = network  # Set the network for player 2
+    puct2.model = network  # Set the network for player 2
     for episode in range(num_episodes):
         episode_start_time = time.time()
 
@@ -516,18 +512,15 @@ def train_model_vs_itself():
 
         # Periodic evaluation and model saving
         if (episode + 1) % evaluation_frequency == 0:
-            # Save current model state for evaluation
-            eval_network.load_state_dict(network.state_dict())
-
-            # Load previous best model
-            prev_network.load_model("models/model_best.pt")
+            # Evaluate against previous best model periodically
+            print(f"\nEpisode {episode + 1}/{num_episodes}")
+            print(f"Average loss: {np.mean(losses[-100:]) if losses else 'N/A'}")
 
             # Use evaluate.py to play games between current and previous model
             current_agent = PUCTPlayer(base_exploration, game)
-            current_agent.network = eval_network
+            current_agent.model = network  # Use the current network directly
             prev_agent = PUCTPlayer(base_exploration, game)
-            prev_agent.network = prev_network
-
+  
             print("\nEvaluating current model against previous best...")
             win_rate = evaluate_agents(
                 current_agent, prev_agent,
