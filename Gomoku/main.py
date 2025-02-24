@@ -358,19 +358,13 @@ def train_model_vs_itself():
     # Training parameters
     num_episodes = 1000
     evaluation_frequency = 20  # Evaluate every N episodes
-    puct_iterations = 800  # Reduced from 800 to speed up training
-    min_buffer_size = 1000  # Minimum positions before starting training
-    batch_size = 128  # Increased from 64
-    num_epochs = 3  # Increased from 3
+    puct_iterations = 1600  # Reduced from 800 to speed up training
     losses = []
 
     # Training statistics
-    total_start_time = time.time()
-    total_games = 0
-    total_moves = 0
+
 
     # Initialize replay buffer
-    max_training_data = 50000  # Increased from 10000 to store more positions
     all_states = []
     all_policies = []
     all_values = []
@@ -388,7 +382,6 @@ def train_model_vs_itself():
         exploration1 = base_exploration * np.random.uniform(0.8, 1.2)
         exploration2 = base_exploration * np.random.uniform(0.8, 1.2)
 
-
         game = Gomoku(board_size=BOARD_SIZE)
         puct1.exploration_weight = exploration1
         puct1.game = game
@@ -396,7 +389,7 @@ def train_model_vs_itself():
         puct2.game = game
         states_this_game = []
         policies_this_game = []
-        values_this_game = []
+        # values_this_game = []
 
         # Play one game
         while not game.is_game_over():
@@ -420,85 +413,82 @@ def train_model_vs_itself():
                         policy[move_idx] = child.N / total_visits
 
             # Get value estimate from root node
-            value = root.Q / root.N if root.N > 0 else 0.0
+            # value = root.Q / root.N if root.N > 0 else 0.0
 
             # Store state, policy and value
             states_this_game.append(game.clone())
             policies_this_game.append(policy)
-            values_this_game.append(value)
 
             # Make the move
             game.make_move(move)
 
         # Get game result without flipping for perspective
-        if game.status == BLACK:
-            game_result = 1.0
-        elif game.status == WHITE:
-            game_result = -1.0
-        else:
-            game_result = 0.0
-            
+        winner = game.get_winner()
+        print(f"Episode {episode + 1}, Winner: {'Black' if winner == 1 else 'White' if winner == -1 else 'Draw'}", flush=True)
         # Update training data
         all_states.extend(states_this_game)
         all_policies.extend(policies_this_game)
-        all_values.extend([game_result] * len(states_this_game))  # Use same result for all states
+        all_values.extend([winner] * len(states_this_game))  # Use same result for all states
 
-        # Maintain maximum size of training data
-        if len(all_states) > max_training_data:
-            all_states = all_states[-max_training_data:]
-            all_policies = all_policies[-max_training_data:]
-            all_values = all_values[-max_training_data:]
+        # Train once on collected data
+        avg_loss = 0  # Track batch loss
+        if len(all_states) == 0:  # Check for empty dataset
+            print("Warning: No training data available! Skipping training.")
+            return network  # Exit training early
 
-        # Train on random batch from replay buffer
-        if len(all_states) >= min_buffer_size:  # Only start training after collecting enough data
-            batch_size = min(batch_size, len(all_states))
-            indices = np.random.choice(len(all_states), batch_size, replace=False)
-
-            # Convert states to tensors
-            batch_states = torch.stack([state.encode() for state in [all_states[i] for i in indices]])
-            batch_states = batch_states.to(network.device)  # Ensure states are on correct device
-
-            # Convert policies to tensors
-            batch_policies = torch.stack([torch.tensor(policy, dtype=torch.float32) for policy in [all_policies[i] for i in indices]])
-            batch_policies = batch_policies.to(network.device)
-
-            # Convert values to tensors with proper perspective
-            batch_values = torch.tensor([all_values[i] for i in indices], dtype=torch.float32)
-            batch_values = batch_values.to(network.device)
-
-            # Train multiple times on the same batch
-            total_loss = 0
-            for _ in range(num_epochs):
-                loss = network.train_step(batch_states, batch_policies, batch_values)
-                total_loss += loss
-            
-            if num_epochs > 0:
-                avg_loss = total_loss / num_epochs
-                losses.append(avg_loss)
-                
-                # Print detailed training stats periodically
-                if len(losses) % 10 == 0:
-                    recent_losses = losses[-10:]
-                    avg_recent_loss = sum(recent_losses) / len(recent_losses)
-                    print(f"\nTraining Stats:")
-                    print(f"Recent average loss: {avg_recent_loss:.4f}")
-                    print(f"Value range in batch: [{batch_values.min():.2f}, {batch_values.max():.2f}]")
-                    print(f"Policy sum range: [{batch_policies.sum(dim=1).min():.2f}, {batch_policies.sum(dim=1).max():.2f}]")
+        # Convert to numpy arrays for efficient shuffling
+        states_array = np.array(all_states)
+        policies_array = np.array(all_policies)
+        values_array = np.array(all_values)
         
-        # Training statistics
-        episode_duration = time.time() - episode_start_time
-        total_duration = time.time() - total_start_time
-        total_games += 1
-        moves_this_game = len(states_this_game)
-        total_moves += moves_this_game
+        batch_size = min(64, len(states_array))  # Ensure batch size isn't larger than dataset
+        if batch_size == 0:
+            print("Warning: No data to train on! Skipping training.")
+            return network
 
-        # Print progress
-        print(f"\nEpisode {episode + 1}/{num_episodes}")
-        print(f"Duration: {episode_duration:.1f}s ({moves_this_game} moves, {moves_this_game/episode_duration:.1f} moves/s)")
-        print(f"Total training time: {total_duration:.1f} seconds")
-        print(f"Games: {total_games}, Moves: {total_moves}, Avg moves/game: {total_moves/total_games:.1f}")
-        if losses:
-            print(f"Current loss: {losses[-1]:.4f}")
+        num_epochs = 3  # Number of times to shuffle and train on all data
+        num_batches = max(1, len(states_array) // batch_size)  # At least 1 batch
+        total_batches = num_batches * num_epochs
+        
+        # Train for multiple epochs, shuffling data each time
+        for epoch in range(num_epochs):
+            # Shuffle all arrays using the same permutation
+            shuffle_indices = np.random.permutation(len(states_array))
+            shuffled_states = states_array[shuffle_indices]
+            shuffled_policies = policies_array[shuffle_indices]
+            shuffled_values = values_array[shuffle_indices]
+            
+            epoch_loss = 0
+            
+            for batch_idx in range(num_batches):
+                start_idx = batch_idx * batch_size
+                end_idx = min(start_idx + batch_size, len(shuffled_states))  # Ensure we don't go past array bounds
+                
+                # Skip empty batches
+                if end_idx <= start_idx:
+                    continue
+                
+                # Create batch tensors from shuffled arrays
+                state_batch = torch.stack([shuffled_states[i].encode().to(device) for i in range(start_idx, end_idx)])
+                policy_batch = torch.stack([torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)])
+                value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
+                
+                # Perform a training step with the batch
+                batch_loss = network.train_step(state_batch, policy_batch, value_batch)
+                epoch_loss += batch_loss
+            
+            if num_batches > 0:  # Only update loss if we had batches
+                avg_loss += epoch_loss / total_batches
+                print(f"Episode {episode+1}, Epoch {epoch+1}/{num_epochs}, Loss: {epoch_loss/num_batches:.4f}", flush=True)
+        
+        losses.append(avg_loss)  # Store loss
+
+        print(f"Episode {episode+1}, Average Loss: {avg_loss:.4f}", flush=True)
+
+        # Save latest model and plot loss
+        network.save_model("models/model_latest.pt")
+        if (episode + 1) % 10 == 0:
+            plot_training_loss(losses)
 
         # Periodic evaluation and model saving
         if (episode + 1) % evaluation_frequency == 0:
