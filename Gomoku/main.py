@@ -434,18 +434,28 @@ def train_model_vs_itself():
             # Make the move
             game.make_move(move)
 
-        # Get game result
+        # Get game result and adjust for player perspective
         if game.status == BLACK:
             game_result = 1.0
         elif game.status == WHITE:
             game_result = -1.0
         else:
             game_result = 0.0
+            
+        # Adjust game result based on player perspective
+        final_values = []
+        for i in range(len(states_this_game)):
+            state = states_this_game[i]
+            # If it's White's turn in this state, negate the result
+            if state.next_player == WHITE:
+                final_values.append(-game_result)
+            else:
+                final_values.append(game_result)
 
-        # Update training data
+        # Update training data with proper perspective
         all_states.extend(states_this_game)
         all_policies.extend(policies_this_game)
-        all_values.extend([game_result] * len(states_this_game))
+        all_values.extend(final_values)  # Use perspective-adjusted values
 
         # Maintain maximum size of training data
         if len(all_states) > max_training_data:
@@ -463,10 +473,10 @@ def train_model_vs_itself():
             batch_states = batch_states.to(network.device)  # Ensure states are on correct device
 
             # Convert policies to tensors
-            batch_policies = torch.stack([torch.tensor(policy) for policy in [all_policies[i] for i in indices]])
+            batch_policies = torch.stack([torch.tensor(policy, dtype=torch.float32) for policy in [all_policies[i] for i in indices]])
             batch_policies = batch_policies.to(network.device)
 
-            # Convert values to tensors
+            # Convert values to tensors with proper perspective
             batch_values = torch.tensor([all_values[i] for i in indices], dtype=torch.float32)
             batch_values = batch_values.to(network.device)
 
@@ -476,9 +486,19 @@ def train_model_vs_itself():
                 loss = network.train_step(batch_states, batch_policies, batch_values)
                 total_loss += loss
             
-            avg_loss = total_loss / num_epochs
-            losses.append(avg_loss)
-
+            if num_epochs > 0:
+                avg_loss = total_loss / num_epochs
+                losses.append(avg_loss)
+                
+                # Print detailed training stats periodically
+                if len(losses) % 10 == 0:
+                    recent_losses = losses[-10:]
+                    avg_recent_loss = sum(recent_losses) / len(recent_losses)
+                    print(f"\nTraining Stats:")
+                    print(f"Recent average loss: {avg_recent_loss:.4f}")
+                    print(f"Value range in batch: [{batch_values.min():.2f}, {batch_values.max():.2f}]")
+                    print(f"Policy sum range: [{batch_policies.sum(dim=1).min():.2f}, {batch_policies.sum(dim=1).max():.2f}]")
+        
         # Training statistics
         episode_duration = time.time() - episode_start_time
         total_duration = time.time() - total_start_time
