@@ -540,11 +540,11 @@ if __name__ == "__main__":
     
     # Final evaluation
     print("\nFinal model evaluation:", flush=True)
-    
+    game = Gomoku(board_size=BOARD_SIZE)
     # Create agents for evaluation
-    final_agent = PUCTPlayer(1.4,
-                                                network=trained_network)
-    best_agent = PUCTPlayer(1.4)  # Best Puct as baseline
+    final_agent = PUCTPlayer(1.4, game)
+    final_agent.model = trained_network
+    best_agent = PUCTPlayer(1.4, game)  # Best Puct as baseline
     
     # Evaluate final model against pure MCTS baseline
     evaluate_agents(
