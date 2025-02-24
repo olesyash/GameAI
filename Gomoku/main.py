@@ -362,7 +362,10 @@ def train_model_vs_itself():
     # Training parameters
     num_episodes = 1000
     evaluation_frequency = 20  # Evaluate every N episodes
-    puct_iterations = 800  # Number of PUCT iterations per move
+    puct_iterations = 800  # Reduced from 800 to speed up training
+    min_buffer_size = 1000  # Minimum positions before starting training
+    batch_size = 128  # Increased from 64
+    num_epochs = 3  # Increased from 3
     losses = []
 
     # Training statistics
@@ -371,14 +374,16 @@ def train_model_vs_itself():
     total_moves = 0
 
     # Initialize replay buffer
-    max_training_data = 10000  # Maximum number of positions to store
+    max_training_data = 50000  # Increased from 10000 to store more positions
     all_states = []
     all_policies = []
     all_values = []
 
     game = Gomoku(board_size=BOARD_SIZE)
     puct1 = PUCTPlayer(1.4, game)
+    puct1.network = network  # Set the network for player 1
     puct2 = PUCTPlayer(1.4, game)
+    puct2.network = network  # Set the network for player 2
     for episode in range(num_episodes):
         episode_start_time = time.time()
 
@@ -390,7 +395,9 @@ def train_model_vs_itself():
 
         game = Gomoku(board_size=BOARD_SIZE)
         puct1.exploration_weight = exploration1
+        puct1.game = game
         puct2.exploration_weight = exploration2
+        puct2.game = game
         states_this_game = []
         policies_this_game = []
         values_this_game = []
@@ -447,12 +454,13 @@ def train_model_vs_itself():
             all_values = all_values[-max_training_data:]
 
         # Train on random batch from replay buffer
-        if len(all_states) >= 64:  # Minimum batch size
-            batch_size = min(64, len(all_states))
+        if len(all_states) >= min_buffer_size:  # Only start training after collecting enough data
+            batch_size = min(batch_size, len(all_states))
             indices = np.random.choice(len(all_states), batch_size, replace=False)
 
             # Convert states to tensors
             batch_states = torch.stack([state.encode() for state in [all_states[i] for i in indices]])
+            batch_states = batch_states.to(network.device)  # Ensure states are on correct device
 
             # Convert policies to tensors
             batch_policies = torch.stack([torch.tensor(policy) for policy in [all_policies[i] for i in indices]])
@@ -462,8 +470,14 @@ def train_model_vs_itself():
             batch_values = torch.tensor([all_values[i] for i in indices], dtype=torch.float32)
             batch_values = batch_values.to(network.device)
 
-            loss = network.train_step(batch_states, batch_policies, batch_values)
-            losses.append(loss)
+            # Train multiple times on the same batch
+            total_loss = 0
+            for _ in range(num_epochs):
+                loss = network.train_step(batch_states, batch_policies, batch_values)
+                total_loss += loss
+            
+            avg_loss = total_loss / num_epochs
+            losses.append(avg_loss)
 
         # Training statistics
         episode_duration = time.time() - episode_start_time
