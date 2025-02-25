@@ -358,13 +358,11 @@ def train_model_vs_itself():
     # Training parameters
     num_episodes = 1000
     evaluation_frequency = 20  # Evaluate every N episodes
-    puct_iterations = 1600  # Reduced from 800 to speed up training
+    puct_iterations = 1600  # Iterations for PUCT search
     losses = []
 
-    # Training statistics
-
-
-    # Initialize replay buffer
+    # Initialize replay buffer with maximum size
+    max_buffer_size = 5000  # Limit buffer size to prevent old experiences from dominating
     all_states = []
     all_policies = []
     all_values = []
@@ -389,7 +387,7 @@ def train_model_vs_itself():
         puct2.game = game
         states_this_game = []
         policies_this_game = []
-        # values_this_game = []
+        values_this_game = []  # Store Q-values from PUCT search
 
         # Play one game
         while not game.is_game_over():
@@ -413,22 +411,41 @@ def train_model_vs_itself():
                         policy[move_idx] = child.N / total_visits
 
             # Get value estimate from root node
-            # value = root.Q / root.N if root.N > 0 else 0.0
+            value = root.Q / max(1, root.N)  # Use Q-value from PUCT search
 
             # Store state, policy and value
             states_this_game.append(game.clone())
             policies_this_game.append(policy)
+            values_this_game.append(value)  # Store Q-value instead of final result
 
             # Make the move
             game.make_move(move)
 
-        # Get game result without flipping for perspective
+        # Get game result
         winner = game.get_winner()
         print(f"Episode {episode + 1}, Winner: {'Black' if winner == 1 else 'White' if winner == -1 else 'Draw'}", flush=True)
+        
+        # Update training data with TD-lambda style targets
+        # Blend PUCT search values with final outcome for better targets
+        lambda_param = 0.7  # Weight between search value and final outcome
+        for i in range(len(values_this_game)):
+            # Adjust value target based on player perspective
+            player_perspective = 1 if i % 2 == 0 else -1  # Alternate perspective based on player
+            final_outcome = winner * player_perspective  # Adjust winner from game perspective to player perspective
+            
+            # Blend search value with final outcome
+            values_this_game[i] = (1 - lambda_param) * values_this_game[i] + lambda_param * final_outcome
+        
         # Update training data
         all_states.extend(states_this_game)
         all_policies.extend(policies_this_game)
-        all_values.extend([winner] * len(states_this_game))  # Use same result for all states
+        all_values.extend(values_this_game)
+        
+        # Maintain buffer size
+        if len(all_states) > max_buffer_size:
+            all_states = all_states[-max_buffer_size:]
+            all_policies = all_policies[-max_buffer_size:]
+            all_values = all_values[-max_buffer_size:]
 
         # Train once on collected data
         avg_loss = 0  # Track batch loss
@@ -440,7 +457,7 @@ def train_model_vs_itself():
         states_array = np.array(all_states)
         policies_array = np.array(all_policies)
         values_array = np.array(all_values)
-        
+
         batch_size = min(64, len(states_array))  # Ensure batch size isn't larger than dataset
         if batch_size == 0:
             print("Warning: No data to train on! Skipping training.")
@@ -531,24 +548,150 @@ def train_model_vs_itself():
     return network
 
 
+def test_value_perspectives():
+    """Test function to verify how values are interpreted in PUCT and MCTS."""
+    print("\n=== Testing Value Perspectives ===")
+    
+    # Initialize game and players
+    game = Gomoku(board_size=BOARD_SIZE)
+    
+    # Create MCTS player
+    mcts = MCTSPlayer(exploration_weight=1.4)
+    
+    # Create PUCT player with network
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    network = GameNetwork(BOARD_SIZE, device)
+    network.to(device)
+    try:
+        network.load_model(os.path.join("models", "model_best.pt"))
+        print("Loaded model successfully")
+    except:
+        print("No model found, using fresh network")
+    
+    puct = PUCTPlayer(1.4, game)
+    puct.model = network
+    
+    # Create a simple test case with a clear advantage for Black
+    # Black has 3 in a row and is about to win
+    print("\nCreating a test position with advantage for Black:")
+    game.board[3, 1] = BLACK  # Black
+    game.board[3, 2] = BLACK  # Black
+    game.board[3, 3] = BLACK  # Black
+    game.next_player = BLACK  # Black to move (should be advantageous)
+    
+    print("\nBoard state (Black to move, Black has advantage):")
+    print_board(game.board)
+    
+    # Test MCTS value
+    print("\n--- MCTS Value Test (Black to move) ---")
+    _, mcts_root = mcts.search(game.clone(), iterations=1000)
+    mcts_value = mcts_root.value / max(1, mcts_root.visits)
+    print(f"MCTS value (from root): {mcts_value:.4f}")
+    print(f"Current player: {'Black' if game.next_player == 1 else 'White'} ({game.next_player})")
+    print(f"Interpretation: {'Favorable for current player' if mcts_value > 0 else 'Unfavorable for current player'}")
+    
+    # Test PUCT value
+    print("\n--- PUCT Value Test (Black to move) ---")
+    _, puct_root = puct.best_move(game.clone(), iterations=1000, is_training=True)
+    puct_value = puct_root.Q / max(1, puct_root.N)
+    print(f"PUCT value (from root): {puct_value:.4f}")
+    print(f"Current player: {'Black' if game.next_player == 1 else 'White'} ({game.next_player})")
+    print(f"Interpretation: {'Favorable for current player' if puct_value > 0 else 'Unfavorable for current player'}")
+    
+    # Now switch to White's perspective
+    game.next_player = WHITE  # White to move (should be disadvantageous)
+    
+    print("\nSame board state (White to move, White has disadvantage):")
+    print_board(game.board)
+    
+    # Test MCTS value
+    print("\n--- MCTS Value Test (White to move) ---")
+    _, mcts_root = mcts.search(game.clone(), iterations=1000)
+    mcts_value = mcts_root.value / max(1, mcts_root.visits)
+    print(f"MCTS value (from root): {mcts_value:.4f}")
+    print(f"Current player: {'Black' if game.next_player == 1 else 'White'} ({game.next_player})")
+    print(f"Interpretation: {'Favorable for current player' if mcts_value > 0 else 'Unfavorable for current player'}")
+    
+    # Test PUCT value
+    print("\n--- PUCT Value Test (White to move) ---")
+    _, puct_root = puct.best_move(game.clone(), iterations=1000, is_training=True)
+    puct_value = puct_root.Q / max(1, puct_root.N)
+    print(f"PUCT value (from root): {puct_value:.4f}")
+    print(f"Current player: {'Black' if game.next_player == 1 else 'White'} ({game.next_player})")
+    print(f"Interpretation: {'Favorable for current player' if puct_value > 0 else 'Unfavorable for current player'}")
+    
+    # Test with a different position where White has advantage
+    game = Gomoku(board_size=BOARD_SIZE)
+    game.board[2, 1] = WHITE  # White
+    game.board[2, 2] = WHITE  # White
+    game.board[2, 3] = WHITE  # White
+    game.next_player = WHITE  # White to move (should be advantageous)
+    
+    print("\nNew board state (White to move, White has advantage):")
+    print_board(game.board)
+    
+    # Test MCTS value
+    print("\n--- MCTS Value Test (White to move with advantage) ---")
+    _, mcts_root = mcts.search(game.clone(), iterations=1000)
+    mcts_value = mcts_root.value / max(1, mcts_root.visits)
+    print(f"MCTS value (from root): {mcts_value:.4f}")
+    print(f"Current player: {'Black' if game.next_player == 1 else 'White'} ({game.next_player})")
+    print(f"Interpretation: {'Favorable for current player' if mcts_value > 0 else 'Unfavorable for current player'}")
+    
+    # Test PUCT value
+    print("\n--- PUCT Value Test (White to move with advantage) ---")
+    _, puct_root = puct.best_move(game.clone(), iterations=1000, is_training=True)
+    puct_value = puct_root.Q / max(1, puct_root.N)
+    print(f"PUCT value (from root): {puct_value:.4f}")
+    print(f"Current player: {'Black' if game.next_player == 1 else 'White'} ({game.next_player})")
+    print(f"Interpretation: {'Favorable for current player' if puct_value > 0 else 'Unfavorable for current player'}")
+    
+    # Now switch to Black's perspective
+    game.next_player = BLACK  # Black to move (should be disadvantageous)
+    
+    print("\nSame board state (Black to move, Black has disadvantage):")
+    print_board(game.board)
+    
+    # Test MCTS value
+    print("\n--- MCTS Value Test (Black to move with disadvantage) ---")
+    _, mcts_root = mcts.search(game.clone(), iterations=1000)
+    mcts_value = mcts_root.value / max(1, mcts_root.visits)
+    print(f"MCTS value (from root): {mcts_value:.4f}")
+    print(f"Current player: {'Black' if game.next_player == 1 else 'White'} ({game.next_player})")
+    print(f"Interpretation: {'Favorable for current player' if mcts_value > 0 else 'Unfavorable for current player'}")
+    
+    # Test PUCT value
+    print("\n--- PUCT Value Test (Black to move with disadvantage) ---")
+    _, puct_root = puct.best_move(game.clone(), iterations=1000, is_training=True)
+    puct_value = puct_root.Q / max(1, puct_root.N)
+    print(f"PUCT value (from root): {puct_value:.4f}")
+    print(f"Current player: {'Black' if game.next_player == 1 else 'White'} ({game.next_player})")
+    print(f"Interpretation: {'Favorable for current player' if puct_value > 0 else 'Unfavorable for current player'}")
+    
+    print("\n=== Test Complete ===")
+
 if __name__ == "__main__":
     # Set random seed for reproducibility
     torch.manual_seed(42)
     
+    # Run the diagnostic test
+    test_value_perspectives()
+    
+    # Comment out the following lines when running the test
     # Train the model using self-play with PUCT
-    trained_network = train_model_vs_itself()
+    # trained_network = train_model_vs_itself()
     
     # Final evaluation
-    print("\nFinal model evaluation:", flush=True)
-    game = Gomoku(board_size=BOARD_SIZE)
+    # print("\nFinal model evaluation:", flush=True)
+    # game = Gomoku(board_size=BOARD_SIZE)
     # Create agents for evaluation
-    final_agent = PUCTPlayer(1.4, game)
-    final_agent.model = trained_network
-    best_agent = PUCTPlayer(1.4, game)  # Best Puct as baseline
+    # final_agent = PUCTPlayer(1.4, game)
+    # final_agent.model = trained_network
+    # best_agent = PUCTPlayer(1.4, game)  # Best Puct as baseline
     
     # Evaluate final model against pure MCTS baseline
-    evaluate_agents(
-        final_agent, best_agent,
-        "Final_Model", "BestPuct_Model",
-        num_games=50, board_size=BOARD_SIZE
-    )
+    # evaluate_agents(
+    #     final_agent, best_agent,
+    #     "Final_Model", "BestPuct_Model",
+    #     num_games=50, board_size=BOARD_SIZE
+    # )
