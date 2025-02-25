@@ -675,11 +675,11 @@ if __name__ == "__main__":
     torch.manual_seed(42)
     
     # Run the diagnostic test
-    test_value_perspectives()
+    # test_value_perspectives()
     
     # Comment out the following lines when running the test
     # Train the model using self-play with PUCT
-    # trained_network = train_model_vs_itself()
+    trained_network = train_model_vs_itself()
     
     # Final evaluation
     # print("\nFinal model evaluation:", flush=True)
