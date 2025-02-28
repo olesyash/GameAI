@@ -37,7 +37,7 @@ def train_model():
 
     # Keep track of best model
     best_win_rate = 0.0
-    evaluation_frequency = 50  # Evaluate every 50 episodes
+    evaluation_frequency = 5  # Evaluate every 50 episodes
 
     # Store all training data
     all_states = []
@@ -82,6 +82,7 @@ def train_model():
             move1 = best_node1.state.last_move
             if not game.make_move(move1):
                 break
+            
 
             # Calculate policy from MCTS
             policy = np.zeros(BOARD_SIZE * BOARD_SIZE)
@@ -120,8 +121,15 @@ def train_model():
                     policy[move_idx] = child.visits / total_visits
 
             policies_this_game.append(policy)
+            print('--------------')
+            print(game.board)
+            print('--------------')
 
         # Get game result (just for logging)
+        print('-----end-game--------')
+        print(game.board)
+        print('--------------')
+ 
         winner = game.get_winner()
         print(f"Episode {episode + 1}, Winner: {'Black' if winner == 1 else 'White' if winner == -1 else 'Draw'}", flush=True)
 
@@ -222,6 +230,7 @@ def evaluate_model(network, num_games=10):
             winner = play_game1(puct, mcts)
         else:
             winner = play_game2(puct, mcts)
+            winner *= -1
 
         if winner == 1:  # PUCT wins
             wins += 1
@@ -299,12 +308,21 @@ def play_game1(puct, mcts):
         move = state.last_move
         print(f"puct move: {move}")
         game.make_move(move)
-
+        if game.is_game_over():
+            break
+        
         best_node, root = mcts.search(game, iterations=MCTS_ITERATIONS)
         move = best_node.state.last_move
-        print(f"mcts move: {move}")
         game.make_move(move)
-
+        print(f"mcts move: {move}")
+        print('--------------------')
+        print(game.board)
+        print('-----------------')
+    
+    print('---------end-game-----------')
+    print(game.board)
+    print('-----------------')
+    print(F'thw winner {game.get_winner()}')
     return game.get_winner()
 
 
@@ -317,6 +335,8 @@ def play_game2(puct, mcts):
         move = best_node.state.last_move
         print(f"mcts move: {move}")
         game.make_move(move)
+        if game.is_game_over():
+            break
 
         state, best_node = puct.best_move(game, iterations=PUCT_ITERATIONS)
         if not state:
@@ -324,6 +344,14 @@ def play_game2(puct, mcts):
         move = state.last_move
         print(f"puct move: {move}")
         game.make_move(move)
+        print('--------------------')
+        print(game.board)
+        print('-----------------')
+    
+    print('---------end-game-----------')
+    print(game.board)
+    print('-----------------')
+    print(F'thw winner {game.get_winner()}')
 
     return game.get_winner()
 
@@ -679,8 +707,8 @@ if __name__ == "__main__":
     
     # Comment out the following lines when running the test
     # Train the model using self-play with PUCT
-    trained_network = train_model_vs_itself()
-    
+    #trained_network = train_model_vs_itself()
+    trained_network = train_model()
     # Final evaluation
     # print("\nFinal model evaluation:", flush=True)
     # game = Gomoku(board_size=BOARD_SIZE)

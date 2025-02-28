@@ -92,7 +92,7 @@ class Gomoku:
         elif len(self.move_history) == self.board_size * self.board_size:
             self.status = 0  # Draw
             self.winner = 0  # Draw
-        self.switch_player()
+        self.switch_player()       
         return True
 
     def switch_player(self):

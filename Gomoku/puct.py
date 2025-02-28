@@ -1,7 +1,8 @@
 import math
 from copy import deepcopy
-import random
-import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
+#import matplotlib.pyplot as plt
 import numpy as np
 
 from nn import GameNetwork
@@ -9,7 +10,6 @@ from fake_network import FakeNetwork
 import torch
 import torch.nn.functional as F
 from gomoku import Gomoku, BOARD_SIZE, BOARD_TENSOR, POLICY_PROBS, STATUS
-import time
 import os
 BEST_MODEL_PATH = os.path.join("models", "model_best.pt")
 TIC_TAC_TOE = os.path.join("models", "tic_tac_toe.pt")
