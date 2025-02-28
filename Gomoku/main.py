@@ -10,7 +10,7 @@ import os
 from MCTS import MCTSPlayer
 import time
 
-MCTS_ITERATIONS = 4000
+MCTS_ITERATIONS = 7000
 PUCT_ITERATIONS = 7000
 
 
@@ -121,14 +121,14 @@ def train_model():
                     policy[move_idx] = child.visits / total_visits
 
             policies_this_game.append(policy)
-            print('--------------')
-            print(game.board)
-            print('--------------')
+            # print('--------------')
+            # print(game.board)
+            # print('--------------')
 
         # Get game result (just for logging)
-        print('-----end-game--------')
-        print(game.board)
-        print('--------------')
+        # print('-----end-game--------')
+        # print(game.board)
+        # print('--------------')
  
         winner = game.get_winner()
         print(f"Episode {episode + 1}, Winner: {'Black' if winner == 1 else 'White' if winner == -1 else 'Draw'}", flush=True)
