@@ -306,7 +306,7 @@ def play_game1(puct, mcts):
     while not game.is_game_over():
         state, best_node = puct.best_move(game, iterations=PUCT_ITERATIONS)
         move = state.last_move
-        print(f"puct move: {move}")
+        # print(f"puct move: {move}")
         game.make_move(move)
         if game.is_game_over():
             break
@@ -314,15 +314,15 @@ def play_game1(puct, mcts):
         best_node, root = mcts.search(game, iterations=MCTS_ITERATIONS)
         move = best_node.state.last_move
         game.make_move(move)
-        print(f"mcts move: {move}")
-        print('--------------------')
-        print(game.board)
-        print('-----------------')
+        # print(f"mcts move: {move}")
+        # print('--------------------')
+        # print(game.board)
+        # print('-----------------')
     
-    print('---------end-game-----------')
-    print(game.board)
-    print('-----------------')
-    print(F'thw winner {game.get_winner()}')
+    # print('---------end-game-----------')
+    # print(game.board)
+    # print('-----------------')
+    # print(F'thw winner {game.get_winner()}')
     return game.get_winner()
 
 
@@ -333,7 +333,7 @@ def play_game2(puct, mcts):
     while not game.is_game_over():
         best_node, root = mcts.search(game, iterations=MCTS_ITERATIONS)
         move = best_node.state.last_move
-        print(f"mcts move: {move}")
+        # print(f"mcts move: {move}")
         game.make_move(move)
         if game.is_game_over():
             break
@@ -342,16 +342,16 @@ def play_game2(puct, mcts):
         if not state:
             break
         move = state.last_move
-        print(f"puct move: {move}")
-        game.make_move(move)
-        print('--------------------')
-        print(game.board)
-        print('-----------------')
+        # print(f"puct move: {move}")
+        # game.make_move(move)
+        # print('--------------------')
+        # print(game.board)
+        # print('-----------------')
     
-    print('---------end-game-----------')
-    print(game.board)
-    print('-----------------')
-    print(F'thw winner {game.get_winner()}')
+    # print('---------end-game-----------')
+    # print(game.board)
+    # print('-----------------')
+    # print(F'thw winner {game.get_winner()}')
 
     return game.get_winner()
 
