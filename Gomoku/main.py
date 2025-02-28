@@ -104,7 +104,7 @@ def train_model():
             # Store state and Q-value from MCTS
             current_state = game.clone()
             states_this_game.append(current_state)
-            values_this_game.append(root2.value / max(1, root2.visits))  # Normalize value
+            values_this_game.append(-root2.value / max(1, root2.visits))  # Normalize value
 
             # Make the move
             move2 = best_node2.state.last_move
@@ -384,7 +384,7 @@ def train_model_vs_itself():
         print("No existing model found, starting fresh", flush=True)
 
     # Training parameters
-    num_episodes = 1000
+    num_episodes = 100
     evaluation_frequency = 20  # Evaluate every N episodes
     puct_iterations = 1600  # Iterations for PUCT search
     losses = []
