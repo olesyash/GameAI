@@ -305,15 +305,15 @@ def play_game1(puct, mcts):
 
     while not game.is_game_over():
         state, best_node = puct.best_move(game, iterations=PUCT_ITERATIONS)
-        move = state.last_move
+        move1 = state.last_move
         # print(f"puct move: {move}")
-        game.make_move(move)
+        game.make_move(move1)
         if game.is_game_over():
             break
         
         best_node, root = mcts.search(game, iterations=MCTS_ITERATIONS)
-        move = best_node.state.last_move
-        game.make_move(move)
+        move2 = best_node.state.last_move
+        game.make_move(move2)
         # print(f"mcts move: {move}")
         # print('--------------------')
         # print(game.board)
@@ -342,18 +342,10 @@ def play_game2(puct, mcts):
         if not state:
             break
         move = state.last_move
-        # print(f"puct move: {move}")
-        # game.make_move(move)
-        # print('--------------------')
-        # print(game.board)
-        # print('-----------------')
-    
-    # print('---------end-game-----------')
-    # print(game.board)
-    # print('-----------------')
-    # print(F'thw winner {game.get_winner()}')
+        game.make_move(move)  
 
     return game.get_winner()
+
 
 def print_board(board):
     """Print the game board in a readable format"""
@@ -575,128 +567,6 @@ def train_model_vs_itself():
 
     return network
 
-
-def test_value_perspectives():
-    """Test function to verify how values are interpreted in PUCT and MCTS."""
-    print("\n=== Testing Value Perspectives ===")
-    
-    # Initialize game and players
-    game = Gomoku(board_size=BOARD_SIZE)
-    
-    # Create MCTS player
-    mcts = MCTSPlayer(exploration_weight=1.4)
-    
-    # Create PUCT player with network
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    network = GameNetwork(BOARD_SIZE, device)
-    network.to(device)
-    try:
-        network.load_model(os.path.join("models", "model_best.pt"))
-        print("Loaded model successfully")
-    except:
-        print("No model found, using fresh network")
-    
-    puct = PUCTPlayer(1.4, game)
-    puct.model = network
-    
-    # Create a simple test case with a clear advantage for Black
-    # Black has 3 in a row and is about to win
-    print("\nCreating a test position with advantage for Black:")
-    game.board[3, 1] = BLACK  # Black
-    game.board[3, 2] = BLACK  # Black
-    game.board[3, 3] = BLACK  # Black
-    game.next_player = BLACK  # Black to move (should be advantageous)
-    
-    print("\nBoard state (Black to move, Black has advantage):")
-    print_board(game.board)
-    
-    # Test MCTS value
-    print("\n--- MCTS Value Test (Black to move) ---")
-    _, mcts_root = mcts.search(game.clone(), iterations=1000)
-    mcts_value = mcts_root.value / max(1, mcts_root.visits)
-    print(f"MCTS value (from root): {mcts_value:.4f}")
-    print(f"Current player: {'Black' if game.next_player == 1 else 'White'} ({game.next_player})")
-    print(f"Interpretation: {'Favorable for current player' if mcts_value > 0 else 'Unfavorable for current player'}")
-    
-    # Test PUCT value
-    print("\n--- PUCT Value Test (Black to move) ---")
-    _, puct_root = puct.best_move(game.clone(), iterations=1000, is_training=True)
-    puct_value = puct_root.Q / max(1, puct_root.N)
-    print(f"PUCT value (from root): {puct_value:.4f}")
-    print(f"Current player: {'Black' if game.next_player == 1 else 'White'} ({game.next_player})")
-    print(f"Interpretation: {'Favorable for current player' if puct_value > 0 else 'Unfavorable for current player'}")
-    
-    # Now switch to White's perspective
-    game.next_player = WHITE  # White to move (should be disadvantageous)
-    
-    print("\nSame board state (White to move, White has disadvantage):")
-    print_board(game.board)
-    
-    # Test MCTS value
-    print("\n--- MCTS Value Test (White to move) ---")
-    _, mcts_root = mcts.search(game.clone(), iterations=1000)
-    mcts_value = mcts_root.value / max(1, mcts_root.visits)
-    print(f"MCTS value (from root): {mcts_value:.4f}")
-    print(f"Current player: {'Black' if game.next_player == 1 else 'White'} ({game.next_player})")
-    print(f"Interpretation: {'Favorable for current player' if mcts_value > 0 else 'Unfavorable for current player'}")
-    
-    # Test PUCT value
-    print("\n--- PUCT Value Test (White to move) ---")
-    _, puct_root = puct.best_move(game.clone(), iterations=1000, is_training=True)
-    puct_value = puct_root.Q / max(1, puct_root.N)
-    print(f"PUCT value (from root): {puct_value:.4f}")
-    print(f"Current player: {'Black' if game.next_player == 1 else 'White'} ({game.next_player})")
-    print(f"Interpretation: {'Favorable for current player' if puct_value > 0 else 'Unfavorable for current player'}")
-    
-    # Test with a different position where White has advantage
-    game = Gomoku(board_size=BOARD_SIZE)
-    game.board[2, 1] = WHITE  # White
-    game.board[2, 2] = WHITE  # White
-    game.board[2, 3] = WHITE  # White
-    game.next_player = WHITE  # White to move (should be advantageous)
-    
-    print("\nNew board state (White to move, White has advantage):")
-    print_board(game.board)
-    
-    # Test MCTS value
-    print("\n--- MCTS Value Test (White to move with advantage) ---")
-    _, mcts_root = mcts.search(game.clone(), iterations=1000)
-    mcts_value = mcts_root.value / max(1, mcts_root.visits)
-    print(f"MCTS value (from root): {mcts_value:.4f}")
-    print(f"Current player: {'Black' if game.next_player == 1 else 'White'} ({game.next_player})")
-    print(f"Interpretation: {'Favorable for current player' if mcts_value > 0 else 'Unfavorable for current player'}")
-    
-    # Test PUCT value
-    print("\n--- PUCT Value Test (White to move with advantage) ---")
-    _, puct_root = puct.best_move(game.clone(), iterations=1000, is_training=True)
-    puct_value = puct_root.Q / max(1, puct_root.N)
-    print(f"PUCT value (from root): {puct_value:.4f}")
-    print(f"Current player: {'Black' if game.next_player == 1 else 'White'} ({game.next_player})")
-    print(f"Interpretation: {'Favorable for current player' if puct_value > 0 else 'Unfavorable for current player'}")
-    
-    # Now switch to Black's perspective
-    game.next_player = BLACK  # Black to move (should be disadvantageous)
-    
-    print("\nSame board state (Black to move, Black has disadvantage):")
-    print_board(game.board)
-    
-    # Test MCTS value
-    print("\n--- MCTS Value Test (Black to move with disadvantage) ---")
-    _, mcts_root = mcts.search(game.clone(), iterations=1000)
-    mcts_value = mcts_root.value / max(1, mcts_root.visits)
-    print(f"MCTS value (from root): {mcts_value:.4f}")
-    print(f"Current player: {'Black' if game.next_player == 1 else 'White'} ({game.next_player})")
-    print(f"Interpretation: {'Favorable for current player' if mcts_value > 0 else 'Unfavorable for current player'}")
-    
-    # Test PUCT value
-    print("\n--- PUCT Value Test (Black to move with disadvantage) ---")
-    _, puct_root = puct.best_move(game.clone(), iterations=1000, is_training=True)
-    puct_value = puct_root.Q / max(1, puct_root.N)
-    print(f"PUCT value (from root): {puct_value:.4f}")
-    print(f"Current player: {'Black' if game.next_player == 1 else 'White'} ({game.next_player})")
-    print(f"Interpretation: {'Favorable for current player' if puct_value > 0 else 'Unfavorable for current player'}")
-    
-    print("\n=== Test Complete ===")
 
 if __name__ == "__main__":
     # Set random seed for reproducibility

@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from gomoku import Gomoku, BOARD_SIZE, BOARD_TENSOR, POLICY_PROBS, STATUS
 import os
 BEST_MODEL_PATH = os.path.join("models", "model_best.pt")
-TIC_TAC_TOE = os.path.join("models", "tic_tac_toe.pt")
+TIC_TAC_TOE = os.path.join("models", "model_best_tic_tac_toe_v2.pt")
 
 
 class PUCTNode:
