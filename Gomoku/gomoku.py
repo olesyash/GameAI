@@ -331,3 +331,41 @@ class Gomoku:
             return -1
         else:  # Values close to zero -> 0
             return 0
+
+    def __eq__(self, other):
+        """Compare two Gomoku game states for equality.
+        
+        Two games are equal if they have:
+        1. Same board size
+        2. Same board state (all positions match)
+        3. Same move history
+        """
+        if not isinstance(other, Gomoku):
+            return False
+            
+        # Check board size matches
+        if self.board_size != other.board_size:
+            return False
+            
+        # Check board states match
+        if not np.array_equal(self.board, other.board):
+            return False
+            
+        # Check move histories match
+        if self.move_history != other.move_history:
+            return False
+            
+        return True
+        
+    def __hash__(self):
+        """Generate hash for Gomoku game state.
+        
+        This allows Gomoku objects to be used in sets and as dict keys.
+        Hash is based on board state and move history.
+        """
+        # Convert board to tuple for hashing
+        board_tuple = tuple(map(tuple, self.board))
+        # Convert move history to tuple for hashing
+        moves_tuple = tuple(map(tuple, self.move_history))
+        
+        return hash((board_tuple, moves_tuple, self.board_size))

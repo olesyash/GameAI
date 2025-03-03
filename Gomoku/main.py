@@ -7,37 +7,42 @@ from nn import GameNetwork
 from gomoku import BOARD_SIZE, Gomoku, BLACK, WHITE
 import matplotlib.pyplot as plt
 import os
+import re
 from MCTS import MCTSPlayer
 import time
+import json
+from pathlib import Path
+from datetime import datetime
 
 MCTS_ITERATIONS = 7000
 PUCT_ITERATIONS = 7000
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}", flush=True)
+evaluation_frequency = 100
 
-
-def train_model():
+def initialize_network():
     # Initialize game and network
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}", flush=True)
-
+    # Training parameters
     learning_rate = 0.001
     n_history = 3  # Number of historical moves to track
     network = GameNetwork(BOARD_SIZE, device, n_history=n_history, learning_rate=learning_rate)
     network.to(device)  # Ensure the model is on the correct device
-
     try:
         network.load_model(os.path.join("models", "model_best.pt"))
         print("Loaded latest model", flush=True)
     except:
         print("No existing model found, starting fresh", flush=True)
+    return network
 
-    # Training parameters
 
-    num_episodes = 1000
+def train_model(num_games=1, generate_game_only=False):
+    network = initialize_network()
+
+    num_episodes = num_games
     losses = []
 
     # Keep track of best model
     best_win_rate = 0.0
-    evaluation_frequency = 5  # Evaluate every 50 episodes
 
     # Store all training data
     all_states = []
@@ -51,6 +56,8 @@ def train_model():
     # Create PUCT player with current network
     # puct = PUCTPlayer(exploration_weight, game, fake_network=False)
 
+    games_data = []  # Store all games data
+
     for episode in range(num_episodes):
         start_time = time.time()
         # Randomly vary exploration weights for both players
@@ -62,6 +69,7 @@ def train_model():
         states_this_game = []  # Store all states in this game
         policies_this_game = []  # Store MCTS policies for each state
         values_this_game = []   # Store Q-values from MCTS
+        moves_this_game = []    # Store moves for saving
 
         # Create MCTS players with different exploration weights
         mcts1 = MCTSPlayer(exploration_weight1)
@@ -69,7 +77,6 @@ def train_model():
 
         # Play one game
         while not game.is_game_over():
-
             # Get move from MCTS
             best_node1, root1 = mcts1.search(game, iterations=MCTS_ITERATIONS)
 
@@ -82,7 +89,6 @@ def train_model():
             move1 = best_node1.state.last_move
             if not game.make_move(move1):
                 break
-            
 
             # Calculate policy from MCTS
             policy = np.zeros(BOARD_SIZE * BOARD_SIZE)
@@ -94,6 +100,7 @@ def train_model():
                     policy[move_idx] = child.visits / total_visits
 
             policies_this_game.append(policy)
+            moves_this_game.append((move1, game.get_current_player()))
 
             if game.is_game_over():
                 break
@@ -121,6 +128,7 @@ def train_model():
                     policy[move_idx] = child.visits / total_visits
 
             policies_this_game.append(policy)
+            moves_this_game.append((move2, game.get_current_player()))
             # print('--------------')
             # print(game.board)
             # print('--------------')
@@ -132,6 +140,22 @@ def train_model():
  
         winner = game.get_winner()
         print(f"Episode {episode + 1}, Winner: {'Black' if winner == 1 else 'White' if winner == -1 else 'Draw'}", flush=True)
+        print_board(game.board)
+        # Save game data
+        game_data = {
+            "moves": moves_this_game,
+            "policies": [p.tolist() for p in policies_this_game],
+            "mcts_q_values": [float(v) for v in values_this_game],
+            "winner": winner,
+            "timestamp": datetime.now().isoformat(),
+            "board_size": BOARD_SIZE
+        }
+
+        # Save game data to file
+        save_game_data(game_data)
+
+        if generate_game_only:
+            continue
 
         # Extend training data with this game's data
         all_states.extend(states_this_game)
@@ -213,6 +237,88 @@ def train_model():
             print(f"Episode {episode + 1} completed in {end_time - start_time:.2f}  seconds", flush=True)
 
     return network
+
+def train_from_data_file():
+    best_win_rate  = 0
+    losses = []
+    network = initialize_network()
+    all_states, all_policies, all_values = load_games()
+    start_time  = time.time()
+
+    # Train once on collected data
+    avg_loss = 0  # Track batch loss
+    if len(all_states) == 0:  # Check for empty dataset
+        print("Warning: No training data available! Skipping training.")
+        return network  # Exit training early
+
+    # Convert to numpy arrays for efficient shuffling
+    states_array = np.array(all_states)
+    policies_array = np.array(all_policies)
+    values_array = np.array(all_values)
+
+    batch_size = min(64, len(states_array))  # Ensure batch size isn't larger than dataset
+    if batch_size == 0:
+        print("Warning: No data to train on! Skipping training.")
+        return network
+
+    num_epochs = 1000  # Number of times to shuffle and train on all data
+    num_batches = max(1, len(states_array) // batch_size)  # At least 1 batch
+    total_batches = num_batches * num_epochs
+
+    # Train for multiple epochs, shuffling data each time
+    for epoch in range(num_epochs):
+        # Shuffle all arrays using the same permutation
+        shuffle_indices = np.random.permutation(len(states_array))
+        shuffled_states = states_array[shuffle_indices]
+        shuffled_policies = policies_array[shuffle_indices]
+        shuffled_values = values_array[shuffle_indices]
+
+        epoch_loss = 0
+
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min(start_idx + batch_size, len(shuffled_states))  # Ensure we don't go past array bounds
+
+            # Skip empty batches
+            if end_idx <= start_idx:
+                continue
+
+            # Create batch tensors from shuffled arrays
+            state_batch = torch.stack([shuffled_states[i].encode().to(device) for i in range(start_idx, end_idx)])
+            policy_batch = torch.stack(
+                [torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)])
+            value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
+
+            # Perform a training step with the batch
+            batch_loss = network.train_step(state_batch, policy_batch, value_batch)
+            epoch_loss += batch_loss
+
+        if num_batches > 0:  # Only update loss if we had batches
+            avg_loss += epoch_loss / total_batches
+            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {epoch_loss / num_batches:.4f}",
+                  flush=True)
+
+        losses.append(avg_loss)  # Store loss
+
+        # Save latest model and plot loss
+        network.save_model("models/model_latest.pt")
+        if (epoch + 1) % 10 == 0:
+            plot_training_loss(losses)
+
+        # Evaluate model periodically
+        if (epoch + 1) % evaluation_frequency == 0:
+            print(f"\nEvaluating model after episode {epoch + 1}...", flush=True)
+            win_rate = evaluate_model(network)
+
+            # Save if it's the best model so far
+            if win_rate >= best_win_rate:
+                best_win_rate = win_rate
+                network.save_model("models/model_best.pt")
+                print(f"New best model saved! Win rate: {win_rate:.2%}", flush=True)
+
+            end_time = time.time()
+            print(f"Episode {epoch + 1} completed in {end_time - start_time:.2f}  "
+                  f"seconds", flush=True)
 
 
 def evaluate_model(network, num_games=10):
@@ -299,19 +405,145 @@ def plot_elo_history(elo_system, save_path="plots/elo_history.png"):
     print(f"ELO history plot saved to: {save_path}")
 
 
+class CompactListEncoder(json.JSONEncoder):
+    """Custom JSON encoder that formats lists compactly but keeps structure indented"""
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
+        
+    def encode(self, obj):
+        if isinstance(obj, str):
+            return f'"{obj}"'
+        elif isinstance(obj, (int, float)):
+            return str(obj)
+        elif obj is None:
+            return 'null'
+        elif isinstance(obj, bool):
+            return 'true' if obj else 'false'
+        elif isinstance(obj, (list, tuple)):
+            # Convert to list for consistency
+            items = list(obj)
+            
+            # Empty list
+            if not items:
+                return "[]"
+                
+            # Format moves list: [[[0, 0], 1], [[1, 1], -1]]
+            if isinstance(items[0], (list, tuple)) and len(items[0]) == 2 and \
+               isinstance(items[0][0], (list, tuple)) and len(items[0][0]) == 2:
+                moves_str = ",".join(f"[[{move[0][0]},{move[0][1]}],{move[1]}]" for move in items)
+                return f"[{moves_str}]"
+                
+            # Format policy vectors: [0.1, 0.2, 0.3]
+            if all(isinstance(x, (int, float)) for x in items):
+                return f"[{','.join(str(x) for x in items)}]"
+                
+            # Other lists - encode each item
+            return f"[{','.join(self.encode(x) for x in items)}]"
+        elif isinstance(obj, dict):
+            # Handle dictionary with proper indentation
+            parts = []
+            for key, value in obj.items():
+                encoded_value = self.encode(value)
+                parts.append(f'  "{key}": {encoded_value}')
+            return "{\n" + ",\n".join(parts) + "\n}"
+        else:
+            return super().default(obj)
+
+
+def save_game_data(game_data, filename="training_data.json"):
+    """Save game data to JSON file.
+    
+    Args:
+        game_data (dict): Dictionary containing game data
+        filename (str): Name of file to save to
+    """
+    try:
+        with open(filename, 'r') as f:
+            all_data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        all_data = []
+        
+    all_data.append(game_data)
+    
+    # Generate JSON with custom formatting
+    encoder = CompactListEncoder()
+    json_str = "[\n  " + encoder.encode(all_data[0])
+    for item in all_data[1:]:
+        json_str += ",\n  " + encoder.encode(item)
+    json_str += "\n]"
+    
+    with open(filename, 'w') as f:
+        f.write(json_str)
+
+
+def load_games(filename="training_data.json"):
+    """Load games from saved JSON file and create game states for each move.
+    
+    Args:
+        filename (str): Name of file to load from
+        
+    Returns:
+        tuple: (all_states, all_policies, all_values) where:
+            - all_states is list of board states (numpy arrays)
+            - all_policies is list of policy vectors from MCTS
+            - all_values is list of Q-values from MCTS
+    """
+    try:
+        with open(filename, 'r') as f:
+            all_data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"Error loading games: {e}")
+        return [], [], []
+        
+    all_states = []
+    all_policies = []
+    all_values = []
+    
+    for game_data in all_data:
+        # For each move in the game, create a state
+        game = Gomoku(board_size=game_data["board_size"])
+        moves_so_far = []
+        
+        for i, ((move_x, move_y), player) in enumerate(game_data["moves"]):
+            # Save current board state
+            game_copy = Gomoku(board_size=game_data["board_size"])
+            game_copy.board = game.board.copy()
+            game_copy.move_history = moves_so_far.copy()  # Copy current move history
+            all_states.append(game_copy)
+            
+            # Get policy and Q-value for this move
+            policy = np.array(game_data["policies"][i]) if game_data["policies"][i] is not None else None
+            q_value = float(game_data["mcts_q_values"][i]) if game_data["mcts_q_values"][i] is not None else None
+            
+            all_policies.append(policy)
+            all_values.append(q_value)
+            
+            # Update board and move history for next state
+            game.board[move_x][move_y] = player
+            moves_so_far.append(((move_x, move_y), player))
+            
+    print(f"Successfully loaded {len(all_states)} states from {len(all_data)} games")
+    return all_states, all_policies, all_values
+
+
 def play_game1(puct, mcts):
     """Play a game between two players or against self"""
     game = Gomoku(BOARD_SIZE)
 
     while not game.is_game_over():
         state, best_node = puct.best_move(game, iterations=PUCT_ITERATIONS)
+        if not state:  # Add check for None
+            break
         move1 = state.last_move
-        # print(f"puct move: {move}")
         game.make_move(move1)
         if game.is_game_over():
             break
         
         best_node, root = mcts.search(game, iterations=MCTS_ITERATIONS)
+        if not best_node:  # Add check for None
+            break
         move2 = best_node.state.last_move
         game.make_move(move2)
         # print(f"mcts move: {move}")
@@ -332,6 +564,8 @@ def play_game2(puct, mcts):
 
     while not game.is_game_over():
         best_node, root = mcts.search(game, iterations=MCTS_ITERATIONS)
+        if not best_node:  # Add check for None
+            break
         move = best_node.state.last_move
         # print(f"mcts move: {move}")
         game.make_move(move)
@@ -342,7 +576,7 @@ def play_game2(puct, mcts):
         if not state:
             break
         move = state.last_move
-        game.make_move(move)  
+        game.make_move(move)
 
     return game.get_winner()
 
@@ -578,7 +812,10 @@ if __name__ == "__main__":
     # Comment out the following lines when running the test
     # Train the model using self-play with PUCT
     #trained_network = train_model_vs_itself()
-    trained_network = train_model()
+    # Generate games data only
+    train_model(num_games=10000, generate_game_only=True)
+    trained_network = train_from_data_file()
+
     # Final evaluation
     # print("\nFinal model evaluation:", flush=True)
     # game = Gomoku(board_size=BOARD_SIZE)
