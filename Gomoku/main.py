@@ -21,12 +21,12 @@ print(f"Using device: {device}", flush=True)
 evaluation_frequency = 100
 
 
-def initialize_network():
+def initialize_network(value_weight=3.0):
     # Initialize game and network
     # Training parameters
     learning_rate = 0.001
     n_history = 3  # Number of historical moves to track
-    network = GameNetwork(BOARD_SIZE, device, n_history=n_history, learning_rate=learning_rate)
+    network = GameNetwork(BOARD_SIZE, device, n_history=n_history, learning_rate=learning_rate, value_weight=value_weight)
     network.to(device)  # Ensure the model is on the correct device
     try:
         network.load_model(os.path.join("models", "model_best.pt"))
@@ -243,10 +243,12 @@ def train_model(num_games=1, generate_game_only=False):
     return network
 
 
-def train_from_data_file():
+def train_from_data_file(value_weight=3.0):
     best_win_rate = 0
     losses = []
-    network = initialize_network()
+    value_losses = []
+    policy_losses = []
+    network = initialize_network(value_weight=value_weight)
     all_states, all_policies, all_values = load_games()
     start_time = time.time()
 
@@ -278,6 +280,8 @@ def train_from_data_file():
         shuffled_values = values_array[shuffle_indices]
 
         epoch_loss = 0
+        epoch_value_loss = 0
+        epoch_policy_loss = 0
 
         for batch_idx in range(num_batches):
             start_idx = batch_idx * batch_size
@@ -294,18 +298,26 @@ def train_from_data_file():
             value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
 
             # Perform a training step with the batch
-            batch_loss = network.train_step(state_batch, policy_batch, value_batch)
+            batch_loss, batch_value_loss, batch_policy_loss = network.train_step(state_batch, policy_batch, value_batch)
             epoch_loss += batch_loss
+            epoch_value_loss += batch_value_loss
+            epoch_policy_loss += batch_policy_loss
 
         if num_batches > 0:  # Only update loss if we had batches
             avg_epoch_loss = epoch_loss / num_batches
+            avg_value_loss = epoch_value_loss / num_batches
+            avg_policy_loss = epoch_policy_loss / num_batches
+            
             losses.append(avg_epoch_loss)  # Store loss for this epoch
-            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_epoch_loss:.4f}", flush=True)
+            value_losses.append(avg_value_loss)
+            policy_losses.append(avg_policy_loss)
+            
+            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_epoch_loss:.4f}, Value Loss: {avg_value_loss:.4f}, Policy Loss: {avg_policy_loss:.4f}", flush=True)
 
         # Save latest model and plot loss
         network.save_model("models/model_latest.pt")
         if (epoch + 1) % 5 == 0:
-            plot_training_loss(losses)
+            plot_training_loss(losses, value_losses, policy_losses)
 
         # Evaluate model periodically
         if (epoch + 1) % evaluation_frequency == 0:
@@ -358,58 +370,54 @@ def evaluate_model(network, num_games=10):
     return win_rate
 
 
-def plot_training_loss(losses):
+def plot_training_loss(losses, value_losses=None, policy_losses=None):
     """Plot the training loss history"""
-    plt.figure(figsize=(10, 6))
-    plt.plot(losses, label='Training Loss')
-    plt.xlabel('Episode')
-    plt.ylabel('Loss')
-    plt.title('Training Loss Over Time')
-    plt.grid(True)
-    plt.legend()
-
     # Create plots directory if it doesn't exist
     os.makedirs('plots', exist_ok=True)
-
+    
+    # Plot combined loss
+    plt.figure(figsize=(10, 6))
+    plt.plot(losses, label='Combined Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Combined Training Loss Over Time')
+    plt.grid(True)
+    plt.legend()
+    
     # Save the plot
     save_path = os.path.join('plots', 'training_loss.png')
     plt.savefig(save_path)
     plt.close()
-    print(f"Loss plot saved to: {os.path.abspath(save_path)}", flush=True)
-
-
-def plot_elo_history(elo_system, save_path="plots/elo_history.png"):
-    """Plot ELO rating history of models over training."""
-    plt.figure(figsize=(10, 6))
-
-    # Get all model versions except 'Model_Best'
-    models = sorted([name for name in elo_system.history.keys()
-                     if name.startswith("Model_") and name != "Model_Best"],
-                    key=lambda x: int(x.split("_")[1]))
-
-    if not models:  # No models to plot yet
-        return
-
-    best_history = elo_system.history["Model_Best"]
-
-    # Plot each model's rating
-    episodes = [int(model.split("_")[1]) for model in models]
-    ratings = [elo_system.history[model][-1] for model in models]  # Final rating for each model
-
-    plt.plot(episodes, ratings, 'b.-', label='Current Model')
-    plt.plot(episodes, best_history[-len(episodes):], 'r.-', label='Best Model')
-
-    plt.title("ELO Ratings Over Training")
-    plt.xlabel("Episode")
-    plt.ylabel("ELO Rating")
-    plt.legend()
-    plt.grid(True)
-
-    # Create plots directory if it doesn't exist
-    os.makedirs("plots", exist_ok=True)
-    plt.savefig(save_path)
-    plt.close()
-    print(f"ELO history plot saved to: {save_path}")
+    
+    # Plot separate value and policy losses if available
+    if value_losses and policy_losses:
+        # Value loss plot
+        plt.figure(figsize=(10, 6))
+        plt.plot(value_losses, label='Value Loss', color='blue')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Value Loss Over Time')
+        plt.grid(True)
+        plt.legend()
+        value_path = os.path.join('plots', 'value_loss.png')
+        plt.savefig(value_path)
+        plt.close()
+        
+        # Policy loss plot
+        plt.figure(figsize=(10, 6))
+        plt.plot(policy_losses, label='Policy Loss', color='green')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Policy Loss Over Time')
+        plt.grid(True)
+        plt.legend()
+        policy_path = os.path.join('plots', 'policy_loss.png')
+        plt.savefig(policy_path)
+        plt.close()
+        
+        print(f"Loss plots saved to: {os.path.abspath('plots')}", flush=True)
+    else:
+        print(f"Combined loss plot saved to: {os.path.abspath(save_path)}", flush=True)
 
 
 class CompactListEncoder(json.JSONEncoder):
@@ -592,17 +600,17 @@ def play_game2(puct, mcts):
         best_node, root = mcts.search(game, iterations=MCTS_ITERATIONS)
         if not best_node:  # Add check for None
             break
-        move = best_node.state.last_move
+        move1 = best_node.state.last_move
         # print(f"mcts move: {move}")
-        game.make_move(move)
+        game.make_move(move1)
         if game.is_game_over():
             break
 
         state, best_node = puct.best_move(game, iterations=PUCT_ITERATIONS)
         if not state:
             break
-        move = state.last_move
-        game.make_move(move)
+        move2 = state.last_move
+        game.make_move(move2)
 
     return game.get_winner()
 
@@ -831,6 +839,40 @@ def train_model_vs_itself():
     return network
 
 
+def plot_elo_history(elo_system, save_path="plots/elo_history.png"):
+    """Plot ELO rating history of models over training."""
+    plt.figure(figsize=(10, 6))
+
+    # Get all model versions except 'Model_Best'
+    models = sorted([name for name in elo_system.history.keys()
+                     if name.startswith("Model_") and name != "Model_Best"],
+                    key=lambda x: int(x.split("_")[1]))
+
+    if not models:  # No models to plot yet
+        return
+
+    best_history = elo_system.history["Model_Best"]
+
+    # Plot each model's rating
+    episodes = [int(model.split("_")[1]) for model in models]
+    ratings = [elo_system.history[model][-1] for model in models]  # Final rating for each model
+
+    plt.plot(episodes, ratings, 'b.-', label='Current Model')
+    plt.plot(episodes, best_history[-len(episodes):], 'r.-', label='Best Model')
+
+    plt.title("ELO Ratings Over Training")
+    plt.xlabel("Episode")
+    plt.ylabel("ELO Rating")
+    plt.legend()
+    plt.grid(True)
+
+    # Create plots directory if it doesn't exist
+    os.makedirs("plots", exist_ok=True)
+    plt.savefig(save_path)
+    plt.close()
+    print(f"ELO history plot saved to: {save_path}")
+
+
 if __name__ == "__main__":
     # Set random seed for reproducibility
     torch.manual_seed(42)
@@ -843,7 +885,7 @@ if __name__ == "__main__":
     #trained_network = train_model_vs_itself()
     # Generate games data only
     # train_model(num_games=10000, generate_game_only=True)
-    trained_network = train_from_data_file()
+    trained_network = train_from_data_file(value_weight=3.0)
 
     # Final evaluation
     # print("\nFinal model evaluation:", flush=True)

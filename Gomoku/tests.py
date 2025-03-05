@@ -364,6 +364,123 @@ class TestEvaluateModelVsMCTS(unittest.TestCase):
             self.assertEqual(win_rate, 1.0, "PUCT should lose all games with predefined losing moves")
 
 
+    def test_evaluate_draw(self):
+        # Define move sequences
+        mcts_moves_as_first = [
+            (2, 3),  
+            (3, 2),  
+            (4, 4),  
+            (0, 0),  
+            (2, 1),  
+            (1, 4),
+            (1, 2),
+            (2, 0),
+            (4, 2),
+            (0, 2),
+            (2, 5),
+            (5, 5),
+            (1, 3),
+            (5, 1),
+            (2, 4),
+            (4, 5),
+            (5, 2),
+            (3, 0)
+
+
+        ]
+        
+        puct_moves_as_second = [
+            (3, 3),  # Far from MCTS line
+            (2, 2),  # Still far
+            (1, 1),  # Still far
+            (4, 1),
+            (4, 3),
+            (0, 5),
+            (3, 4),
+            (0, 3),
+            (1, 0),
+            (0, 4),
+            (1, 5),
+            (5, 3),
+            (3, 1),
+            (4, 0),
+            (0, 1),
+            (5, 0),
+            (5, 4),
+            (3, 5)
+        ]
+
+        puct_moves_as_first = mcts_moves_as_first
+        mcts_moves_as_second = puct_moves_as_second
+
+        # Create mock PUCT player
+        mock_puct = Mock()
+        def mock_puct_best_move(game, iterations, is_training=False):
+            print("\nPUCT's turn:")
+            print(f"Game state before PUCT move:")
+            print_board(game.board)
+            
+            move_index = len(game.move_history) // 2
+            is_first = len(game.move_history) % 2 == 0
+            moves = puct_moves_as_first if is_first else puct_moves_as_second
+            
+            if move_index >= len(moves):
+                print("PUCT: No more moves")
+                return None, None
+                
+            move = moves[move_index]
+
+            print(f"PUCT making move: {move}")
+            state = game.clone()
+            state.make_move(move)
+            print("Game state after PUCT move:")
+            print_board(state.board)
+            return state, None
+            
+        mock_puct.best_move = mock_puct_best_move
+        mock_puct.model = self.mock_network
+
+        # Create mock MCTS player
+        mock_mcts = Mock()
+        def mock_mcts_search(game, iterations):
+            print("\nMCTS's turn:")
+            print(f"Game state before MCTS move:")
+            print_board(game.board)
+            
+            move_index = len(game.move_history) // 2
+            is_first = len(game.move_history) % 2 == 0
+            moves = mcts_moves_as_first if is_first else mcts_moves_as_second
+            
+            if move_index >= len(moves):
+                print("MCTS: No more moves")
+                return None, None
+                
+            move = moves[move_index]
+
+            print(f"MCTS making move: {move}")
+            state = game.clone()
+            state.make_move(move)
+            print("Game state after MCTS move:")
+            print_board(state.board)
+            node = Mock()
+            node.state = state
+            return node, None
+            
+        mock_mcts.search = mock_mcts_search
+
+        # Patch both player creations
+        with patch('main.PUCTPlayer', return_value=mock_puct), \
+             patch('main.MCTSPlayer', return_value=mock_mcts):
+            
+            # Run evaluation
+            win_rate = evaluate_model(
+                self.mock_network,
+                num_games=4
+            )
+
+            # Verify win rate calculation - PUCT should lose all games
+            self.assertEqual(win_rate, 0.5, "Draw")
+
 class TestGameDataSerialization(unittest.TestCase):
     def setUp(self):
         self.test_file = "test_training_data.json"

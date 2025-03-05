@@ -52,29 +52,36 @@ class ResidualBlock(nn.Module):
 
 class AlphaLoss(nn.Module):
     """
-    Custom loss as defined in the paper :
-    (z - v) ** 2 --> MSE Loss
-    (-pi * logp) --> Cross Entropy Loss
-    z : self_play_winner
-    v : winner
-    pi : self_play_probas
+    Loss as described in the AlphaZero paper, a weighted sum of:
+    - MSE on value prediction
+    - Cross-entropy on policy
+
+    L = (z - v)² - π^T * log(p)
+    where:
+    z : the expected reward
+    v : our prediction of the value
+    π : the search probabilities
     p : probas
 
     The loss is then averaged over the entire batch
     """
 
-    def __init__(self):
+    def __init__(self, value_weight=1.0):
         super(AlphaLoss, self).__init__()
+        self.value_weight = value_weight
 
     def forward(self, log_ps, vs, target_ps, target_vs):
         value_loss = torch.mean(torch.pow(vs - target_vs, 2))
         policy_loss = -torch.mean(torch.sum(target_ps * log_ps, 1))
-
-        return value_loss + policy_loss
+        
+        # Apply weighting to prioritize value learning if needed
+        total_loss = (self.value_weight * value_loss) + policy_loss
+        
+        return total_loss, value_loss, policy_loss
 
 
 class GameNetwork(nn.Module):
-    def __init__(self, board_size, device, n_history=3, learning_rate=0.0001, weight_decay=0.0001):
+    def __init__(self, board_size, device, n_history=3, learning_rate=0.0001, weight_decay=0.0001, value_weight=3.0):
         """Initialize the neural network.
         
         Args:
@@ -83,6 +90,7 @@ class GameNetwork(nn.Module):
             n_history (int): Number of historical moves to include for each player
             learning_rate (float): Learning rate for optimization
             weight_decay (float): Weight decay for regularization
+            value_weight (float): Weight for the value loss component (higher = more focus on value)
         """
         super().__init__()
         self.board_size = board_size
@@ -118,7 +126,7 @@ class GameNetwork(nn.Module):
 
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=50, gamma=0.95)
-        self.alpha_loss = AlphaLoss()
+        self.alpha_loss = AlphaLoss(value_weight=value_weight)
 
     def forward(self, x):
         """Forward pass through the network."""
@@ -230,7 +238,7 @@ class GameNetwork(nn.Module):
             print(" WARNING: NaN detected in forward pass!")
             return float('nan')  # Prevents corrupt training updates
 
-        loss = self.alpha_loss(predicted_policy, predicted_value, policy_tensor, value_tensor)
+        loss, value_loss, policy_loss = self.alpha_loss(predicted_policy, predicted_value, policy_tensor, value_tensor)
         # Backward pass
         self.optimizer.zero_grad()
         loss.backward()
@@ -240,4 +248,4 @@ class GameNetwork(nn.Module):
         # Update learning rate
         self.scheduler.step()
 
-        return loss.item()
+        return loss.item(), value_loss.item(), policy_loss.item()
