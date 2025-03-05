@@ -20,6 +20,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}", flush=True)
 evaluation_frequency = 100
 
+
 def initialize_network():
     # Initialize game and network
     # Training parameters
@@ -68,8 +69,8 @@ def train_model(num_games=1, generate_game_only=False):
         game = Gomoku(board_size=BOARD_SIZE)
         states_this_game = []  # Store all states in this game
         policies_this_game = []  # Store MCTS policies for each state
-        values_this_game = []   # Store Q-values from MCTS
-        moves_this_game = []    # Store moves for saving
+        values_this_game = []  # Store Q-values from MCTS
+        moves_this_game = []  # Store moves for saving
 
         # Create MCTS players with different exploration weights
         mcts1 = MCTSPlayer(exploration_weight1)
@@ -137,9 +138,10 @@ def train_model(num_games=1, generate_game_only=False):
         # print('-----end-game--------')
         # print(game.board)
         # print('--------------')
- 
+
         winner = game.get_winner()
-        print(f"Episode {episode + 1}, Winner: {'Black' if winner == 1 else 'White' if winner == -1 else 'Draw'}", flush=True)
+        print(f"Episode {episode + 1}, Winner: {'Black' if winner == 1 else 'White' if winner == -1 else 'Draw'}",
+              flush=True)
         print_board(game.board)
         # Save game data
         game_data = {
@@ -172,7 +174,7 @@ def train_model(num_games=1, generate_game_only=False):
         states_array = np.array(all_states)
         policies_array = np.array(all_policies)
         values_array = np.array(all_values)
-        
+
         batch_size = min(64, len(states_array))  # Ensure batch size isn't larger than dataset
         if batch_size == 0:
             print("Warning: No data to train on! Skipping training.")
@@ -181,7 +183,7 @@ def train_model(num_games=1, generate_game_only=False):
         num_epochs = 3  # Number of times to shuffle and train on all data
         num_batches = max(1, len(states_array) // batch_size)  # At least 1 batch
         total_batches = num_batches * num_epochs
-        
+
         # Train for multiple epochs, shuffling data each time
         for epoch in range(num_epochs):
             # Shuffle all arrays using the same permutation
@@ -189,33 +191,35 @@ def train_model(num_games=1, generate_game_only=False):
             shuffled_states = states_array[shuffle_indices]
             shuffled_policies = policies_array[shuffle_indices]
             shuffled_values = values_array[shuffle_indices]
-            
+
             epoch_loss = 0
-            
+
             for batch_idx in range(num_batches):
                 start_idx = batch_idx * batch_size
                 end_idx = min(start_idx + batch_size, len(shuffled_states))  # Ensure we don't go past array bounds
-                
+
                 # Skip empty batches
                 if end_idx <= start_idx:
                     continue
-                
+
                 # Create batch tensors from shuffled arrays
                 state_batch = torch.stack([shuffled_states[i].encode().to(device) for i in range(start_idx, end_idx)])
-                policy_batch = torch.stack([torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)])
+                policy_batch = torch.stack(
+                    [torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)])
                 value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
-                
+
                 # Perform a training step with the batch
                 batch_loss = network.train_step(state_batch, policy_batch, value_batch)
                 epoch_loss += batch_loss
-            
+
             if num_batches > 0:  # Only update loss if we had batches
                 avg_loss += epoch_loss / total_batches
-                print(f"Episode {episode+1}, Epoch {epoch+1}/{num_epochs}, Loss: {epoch_loss/num_batches:.4f}", flush=True)
-        
+                print(f"Episode {episode + 1}, Epoch {epoch + 1}/{num_epochs}, Loss: {epoch_loss / num_batches:.4f}",
+                      flush=True)
+
         losses.append(avg_loss)  # Store loss
 
-        print(f"Episode {episode+1}, Average Loss: {avg_loss:.4f}", flush=True)
+        print(f"Episode {episode + 1}, Average Loss: {avg_loss:.4f}", flush=True)
 
         # Save latest model and plot loss
         network.save_model("models/model_latest.pt")
@@ -238,15 +242,15 @@ def train_model(num_games=1, generate_game_only=False):
 
     return network
 
+
 def train_from_data_file():
-    best_win_rate  = 0
+    best_win_rate = 0
     losses = []
     network = initialize_network()
     all_states, all_policies, all_values = load_games()
-    start_time  = time.time()
+    start_time = time.time()
 
     # Train once on collected data
-    avg_loss = 0  # Track batch loss
     if len(all_states) == 0:  # Check for empty dataset
         print("Warning: No training data available! Skipping training.")
         return network  # Exit training early
@@ -261,7 +265,7 @@ def train_from_data_file():
         print("Warning: No data to train on! Skipping training.")
         return network
 
-    num_epochs = 1000  # Number of times to shuffle and train on all data
+    num_epochs = 10  # Number of times to shuffle and train on all data
     num_batches = max(1, len(states_array) // batch_size)  # At least 1 batch
     total_batches = num_batches * num_epochs
 
@@ -294,20 +298,18 @@ def train_from_data_file():
             epoch_loss += batch_loss
 
         if num_batches > 0:  # Only update loss if we had batches
-            avg_loss += epoch_loss / total_batches
-            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {epoch_loss / num_batches:.4f}",
-                  flush=True)
-
-        losses.append(avg_loss)  # Store loss
+            avg_epoch_loss = epoch_loss / num_batches
+            losses.append(avg_epoch_loss)  # Store loss for this epoch
+            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_epoch_loss:.4f}", flush=True)
 
         # Save latest model and plot loss
         network.save_model("models/model_latest.pt")
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % 5 == 0:
             plot_training_loss(losses)
 
         # Evaluate model periodically
         if (epoch + 1) % evaluation_frequency == 0:
-            print(f"\nEvaluating model after episode {epoch + 1}...", flush=True)
+            print(f"\nEvaluating model after epoch {epoch + 1}...", flush=True)
             win_rate = evaluate_model(network)
 
             # Save if it's the best model so far
@@ -317,8 +319,10 @@ def train_from_data_file():
                 print(f"New best model saved! Win rate: {win_rate:.2%}", flush=True)
 
             end_time = time.time()
-            print(f"Episode {epoch + 1} completed in {end_time - start_time:.2f}  "
-                  f"seconds", flush=True)
+            print(f"Epoch {epoch + 1} completed in {end_time - start_time:.2f} seconds", flush=True)
+            start_time = time.time()  # Reset timer for next evaluation period
+
+    return network
 
 
 def evaluate_model(network, num_games=10):
@@ -326,11 +330,11 @@ def evaluate_model(network, num_games=10):
     wins = 0
     draws = 0
     losses = 0
-    
+
     puct = PUCTPlayer(1.0, Gomoku(BOARD_SIZE), model_path=None)
     puct.model = network
     mcts = MCTSPlayer(1.0)
-    
+
     for game_idx in range(num_games):
         if game_idx % 2 == 0:
             winner = play_game1(puct, mcts)
@@ -344,60 +348,63 @@ def evaluate_model(network, num_games=10):
             losses += 1
         else:  # Draw
             draws += 1
-        print(f"Evaluation game {game_idx + 1}: {'PUCT Win' if winner == 1 else 'MCTS Win' if winner == -1 else 'Draw'}", flush=True)
-    
+        print(
+            f"Evaluation game {game_idx + 1}: {'PUCT Win' if winner == 1 else 'MCTS Win' if winner == -1 else 'Draw'}",
+            flush=True)
+
     win_rate = (wins + 0.5 * draws) / num_games
-    print(f"Evaluation complete - Win rate: {win_rate:.2%} (Wins: {wins}, Draws: {draws}, Losses: {losses})", flush=True)
+    print(f"Evaluation complete - Win rate: {win_rate:.2%} (Wins: {wins}, Draws: {draws}, Losses: {losses})",
+          flush=True)
     return win_rate
 
 
 def plot_training_loss(losses):
-        """Plot the training loss history"""
-        plt.figure(figsize=(10, 6))
-        plt.plot(losses, label='Training Loss')
-        plt.xlabel('Episode')
-        plt.ylabel('Loss')
-        plt.title('Training Loss Over Time')
-        plt.grid(True)
-        plt.legend()
+    """Plot the training loss history"""
+    plt.figure(figsize=(10, 6))
+    plt.plot(losses, label='Training Loss')
+    plt.xlabel('Episode')
+    plt.ylabel('Loss')
+    plt.title('Training Loss Over Time')
+    plt.grid(True)
+    plt.legend()
 
-        # Create plots directory if it doesn't exist
-        os.makedirs('plots', exist_ok=True)
+    # Create plots directory if it doesn't exist
+    os.makedirs('plots', exist_ok=True)
 
-        # Save the plot
-        save_path = os.path.join('plots', 'training_loss.png')
-        plt.savefig(save_path)
-        plt.close()
-        print(f"Loss plot saved to: {os.path.abspath(save_path)}", flush=True)
+    # Save the plot
+    save_path = os.path.join('plots', 'training_loss.png')
+    plt.savefig(save_path)
+    plt.close()
+    print(f"Loss plot saved to: {os.path.abspath(save_path)}", flush=True)
 
 
 def plot_elo_history(elo_system, save_path="plots/elo_history.png"):
     """Plot ELO rating history of models over training."""
     plt.figure(figsize=(10, 6))
-    
+
     # Get all model versions except 'Model_Best'
-    models = sorted([name for name in elo_system.history.keys() 
-                    if name.startswith("Model_") and name != "Model_Best"],
-                   key=lambda x: int(x.split("_")[1]))
-    
+    models = sorted([name for name in elo_system.history.keys()
+                     if name.startswith("Model_") and name != "Model_Best"],
+                    key=lambda x: int(x.split("_")[1]))
+
     if not models:  # No models to plot yet
         return
-        
+
     best_history = elo_system.history["Model_Best"]
-    
+
     # Plot each model's rating
     episodes = [int(model.split("_")[1]) for model in models]
     ratings = [elo_system.history[model][-1] for model in models]  # Final rating for each model
-    
+
     plt.plot(episodes, ratings, 'b.-', label='Current Model')
     plt.plot(episodes, best_history[-len(episodes):], 'r.-', label='Best Model')
-    
+
     plt.title("ELO Ratings Over Training")
     plt.xlabel("Episode")
     plt.ylabel("ELO Rating")
     plt.legend()
     plt.grid(True)
-    
+
     # Create plots directory if it doesn't exist
     os.makedirs("plots", exist_ok=True)
     plt.savefig(save_path)
@@ -407,11 +414,12 @@ def plot_elo_history(elo_system, save_path="plots/elo_history.png"):
 
 class CompactListEncoder(json.JSONEncoder):
     """Custom JSON encoder that formats lists compactly but keeps structure indented"""
+
     def default(self, obj):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
         return super().default(obj)
-        
+
     def encode(self, obj):
         if isinstance(obj, str):
             return f'"{obj}"'
@@ -424,21 +432,21 @@ class CompactListEncoder(json.JSONEncoder):
         elif isinstance(obj, (list, tuple)):
             # Convert to list for consistency
             items = list(obj)
-            
+
             # Empty list
             if not items:
                 return "[]"
-                
+
             # Format moves list: [[[0, 0], 1], [[1, 1], -1]]
             if isinstance(items[0], (list, tuple)) and len(items[0]) == 2 and \
-               isinstance(items[0][0], (list, tuple)) and len(items[0][0]) == 2:
+                    isinstance(items[0][0], (list, tuple)) and len(items[0][0]) == 2:
                 moves_str = ",".join(f"[[{move[0][0]},{move[0][1]}],{move[1]}]" for move in items)
                 return f"[{moves_str}]"
-                
+
             # Format policy vectors: [0.1, 0.2, 0.3]
             if all(isinstance(x, (int, float)) for x in items):
                 return f"[{','.join(str(x) for x in items)}]"
-                
+
             # Other lists - encode each item
             return f"[{','.join(self.encode(x) for x in items)}]"
         elif isinstance(obj, dict):
@@ -464,16 +472,16 @@ def save_game_data(game_data, filename="training_data.json"):
             all_data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         all_data = []
-        
+
     all_data.append(game_data)
-    
+
     # Generate JSON with custom formatting
     encoder = CompactListEncoder()
     json_str = "[\n  " + encoder.encode(all_data[0])
     for item in all_data[1:]:
         json_str += ",\n  " + encoder.encode(item)
     json_str += "\n]"
-    
+
     with open(filename, 'w') as f:
         f.write(json_str)
 
@@ -496,35 +504,53 @@ def load_games(filename="training_data.json"):
     except (FileNotFoundError, json.JSONDecodeError) as e:
         print(f"Error loading games: {e}")
         return [], [], []
-        
+
     all_states = []
     all_policies = []
     all_values = []
     
+    # Track unique games by their moves
+    unique_games = {}
+    duplicates = 0
+    
     for game_data in all_data:
+        # Create a unique key for this game based on its moves
+        moves_key = str(game_data["moves"])
+        
+        # Skip duplicate games
+        if moves_key in unique_games:
+            duplicates += 1
+            continue
+            
+        # Mark this game as processed
+        unique_games[moves_key] = True
+        
         # For each move in the game, create a state
         game = Gomoku(board_size=game_data["board_size"])
-        moves_so_far = []
-        
+        moves_so_far = []  # Keep track of moves to restore game state
+
         for i, ((move_x, move_y), player) in enumerate(game_data["moves"]):
             # Save current board state
             game_copy = Gomoku(board_size=game_data["board_size"])
             game_copy.board = game.board.copy()
             game_copy.move_history = moves_so_far.copy()  # Copy current move history
             all_states.append(game_copy)
-            
+
             # Get policy and Q-value for this move
             policy = np.array(game_data["policies"][i]) if game_data["policies"][i] is not None else None
             q_value = float(game_data["mcts_q_values"][i]) if game_data["mcts_q_values"][i] is not None else None
-            
+
             all_policies.append(policy)
             all_values.append(q_value)
-            
+
             # Update board and move history for next state
             game.board[move_x][move_y] = player
             moves_so_far.append(((move_x, move_y), player))
-            
-    print(f"Successfully loaded {len(all_states)} states from {len(all_data)} games")
+
+    print(f"Successfully loaded {len(all_states)} states from {len(unique_games)} unique games")
+    if duplicates > 0:
+        print(f"Skipped {duplicates} duplicate games")
+    
     return all_states, all_policies, all_values
 
 
@@ -540,7 +566,7 @@ def play_game1(puct, mcts):
         game.make_move(move1)
         if game.is_game_over():
             break
-        
+
         best_node, root = mcts.search(game, iterations=MCTS_ITERATIONS)
         if not best_node:  # Add check for None
             break
@@ -550,7 +576,7 @@ def play_game1(puct, mcts):
         # print('--------------------')
         # print(game.board)
         # print('-----------------')
-    
+
     # print('---------end-game-----------')
     # print(game.board)
     # print('-----------------')
@@ -677,8 +703,9 @@ def train_model_vs_itself():
 
         # Get game result
         winner = game.get_winner()
-        print(f"Episode {episode + 1}, Winner: {'Black' if winner == 1 else 'White' if winner == -1 else 'Draw'}", flush=True)
-        
+        print(f"Episode {episode + 1}, Winner: {'Black' if winner == 1 else 'White' if winner == -1 else 'Draw'}",
+              flush=True)
+
         # Update training data with TD-lambda style targets
         # Blend PUCT search values with final outcome for better targets
         lambda_param = 0.7  # Weight between search value and final outcome
@@ -686,15 +713,15 @@ def train_model_vs_itself():
             # Adjust value target based on player perspective
             player_perspective = 1 if i % 2 == 0 else -1  # Alternate perspective based on player
             final_outcome = winner * player_perspective  # Adjust winner from game perspective to player perspective
-            
+
             # Blend search value with final outcome
             values_this_game[i] = (1 - lambda_param) * values_this_game[i] + lambda_param * final_outcome
-        
+
         # Update training data
         all_states.extend(states_this_game)
         all_policies.extend(policies_this_game)
         all_values.extend(values_this_game)
-        
+
         # Maintain buffer size
         if len(all_states) > max_buffer_size:
             all_states = all_states[-max_buffer_size:]
@@ -720,7 +747,7 @@ def train_model_vs_itself():
         num_epochs = 3  # Number of times to shuffle and train on all data
         num_batches = max(1, len(states_array) // batch_size)  # At least 1 batch
         total_batches = num_batches * num_epochs
-        
+
         # Train for multiple epochs, shuffling data each time
         for epoch in range(num_epochs):
             # Shuffle all arrays using the same permutation
@@ -728,33 +755,35 @@ def train_model_vs_itself():
             shuffled_states = states_array[shuffle_indices]
             shuffled_policies = policies_array[shuffle_indices]
             shuffled_values = values_array[shuffle_indices]
-            
+
             epoch_loss = 0
-            
+
             for batch_idx in range(num_batches):
                 start_idx = batch_idx * batch_size
                 end_idx = min(start_idx + batch_size, len(shuffled_states))  # Ensure we don't go past array bounds
-                
+
                 # Skip empty batches
                 if end_idx <= start_idx:
                     continue
-                
+
                 # Create batch tensors from shuffled arrays
                 state_batch = torch.stack([shuffled_states[i].encode().to(device) for i in range(start_idx, end_idx)])
-                policy_batch = torch.stack([torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)])
+                policy_batch = torch.stack(
+                    [torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)])
                 value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
-                
+
                 # Perform a training step with the batch
                 batch_loss = network.train_step(state_batch, policy_batch, value_batch)
                 epoch_loss += batch_loss
-            
+
             if num_batches > 0:  # Only update loss if we had batches
                 avg_loss += epoch_loss / total_batches
-                print(f"Episode {episode+1}, Epoch {epoch+1}/{num_epochs}, Loss: {epoch_loss/num_batches:.4f}", flush=True)
-        
+                print(f"Episode {episode + 1}, Epoch {epoch + 1}/{num_epochs}, Loss: {epoch_loss / num_batches:.4f}",
+                      flush=True)
+
         losses.append(avg_loss)  # Store loss
 
-        print(f"Episode {episode+1}, Average Loss: {avg_loss:.4f}", flush=True)
+        print(f"Episode {episode + 1}, Average Loss: {avg_loss:.4f}", flush=True)
 
         # Save latest model and plot loss
         network.save_model("models/model_latest.pt")
@@ -771,7 +800,7 @@ def train_model_vs_itself():
             current_agent = PUCTPlayer(base_exploration, game)
             current_agent.model = network  # Use the current network directly
             prev_agent = PUCTPlayer(base_exploration, game)
-  
+
             print("\nEvaluating current model against previous best...")
             win_rate = evaluate_agents(
                 current_agent, prev_agent,
@@ -805,15 +834,15 @@ def train_model_vs_itself():
 if __name__ == "__main__":
     # Set random seed for reproducibility
     torch.manual_seed(42)
-    
+
     # Run the diagnostic test
     # test_value_perspectives()
-    
+
     # Comment out the following lines when running the test
     # Train the model using self-play with PUCT
     #trained_network = train_model_vs_itself()
     # Generate games data only
-    train_model(num_games=10000, generate_game_only=True)
+    # train_model(num_games=10000, generate_game_only=True)
     trained_network = train_from_data_file()
 
     # Final evaluation
@@ -823,7 +852,7 @@ if __name__ == "__main__":
     # final_agent = PUCTPlayer(1.4, game)
     # final_agent.model = trained_network
     # best_agent = PUCTPlayer(1.4, game)  # Best Puct as baseline
-    
+
     # Evaluate final model against pure MCTS baseline
     # evaluate_agents(
     #     final_agent, best_agent,
