@@ -9,45 +9,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-
-def conv3x3(in_channels, out_channels, stride=1):
-    # 3x3 convolution
-    return nn.Conv2d(in_channels, out_channels, kernel_size=3,
-                     stride=stride, padding=1, bias=False)
-
-class ResidualBlock(nn.Module):
-    # Residual block
-    def __init__(self, in_channels, out_channels, stride=1):
-        super(ResidualBlock, self).__init__()
-        self.conv1 = conv3x3(in_channels, out_channels, stride)
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU(inplace=True)
-
-        self.conv2 = conv3x3(out_channels, out_channels)
-        self.bn2 = nn.BatchNorm2d(out_channels)
-
-        self.downsample = False
-        if in_channels != out_channels or stride != 1:
-            self.downsample = True
-            self.downsample_conv = conv3x3(in_channels, out_channels, stride=stride)
-            self.downsample_bn = nn.BatchNorm2d(out_channels)
-
-    def forward(self, x):
-        residual = x
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-        out = self.conv2(out)
-        out = self.bn2(out)
-
-        if self.downsample:
-            residual = self.downsample_conv(residual)
-            residual = self.downsample_bn(residual)
-
-        out += residual
-        out = self.relu(out)
-        return out
-
+"""AlphaZero Neural Network component."""
+import math
+from typing import NamedTuple, Tuple
+import torch
+from torch import nn
+import torch.nn.functional as F
 
 
 class AlphaLoss(nn.Module):
@@ -71,87 +38,186 @@ class AlphaLoss(nn.Module):
         self.value_weight = value_weight
 
     def forward(self, log_ps, vs, target_ps, target_vs):
-        value_loss = torch.mean(torch.pow(vs - target_vs, 2))
-        policy_loss = -torch.mean(torch.sum(target_ps * log_ps, 1))
-        
+        # Policy cross-entropy loss
+        policy_loss = F.cross_entropy(log_ps, target_ps, reduction='mean')
+
+        # State value MSE loss
+        value_loss = F.mse_loss(vs.squeeze(), target_vs, reduction='mean')
+        # value_loss = torch.mean(torch.pow(vs - target_vs, 2))
+        # policy_loss = -torch.mean(torch.sum(target_ps * log_ps, 1))
+
         # Apply weighting to prioritize value learning if needed
         total_loss = (self.value_weight * value_loss) + policy_loss
-        
+
         return total_loss, value_loss, policy_loss
+
+class NetworkOutputs(NamedTuple):
+    pi_prob: torch.Tensor
+    value: torch.Tensor
+
+
+def calc_conv2d_output(h_w, kernel_size=1, stride=1, pad=0, dilation=1):
+    """takes a tuple of (h,w) and returns a tuple of (h,w)"""
+
+    if not isinstance(kernel_size, tuple):
+        kernel_size = (kernel_size, kernel_size)
+    h = math.floor(((h_w[0] + (2 * pad) - (dilation * (kernel_size[0] - 1)) - 1) / stride) + 1)
+    w = math.floor(((h_w[1] + (2 * pad) - (dilation * (kernel_size[1] - 1)) - 1) / stride) + 1)
+    return h, w
+
+
+def initialize_weights(net: nn.Module) -> None:
+    """Initialize weights for Conv2d and Linear layers using kaming initializer."""
+    assert isinstance(net, nn.Module)
+
+    for module in net.modules():
+        if isinstance(module, (nn.Conv2d, nn.Linear)):
+            nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
+
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+
+
+class ResNetBlock(nn.Module):
+    """Basic redisual block."""
+
+    def __init__(
+        self,
+        num_filters: int,
+    ) -> None:
+        super().__init__()
+
+        self.conv_block1 = nn.Sequential(
+            nn.Conv2d(
+                in_channels=num_filters,
+                out_channels=num_filters,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=False,
+            ),
+            nn.BatchNorm2d(num_features=num_filters),
+            nn.ReLU(),
+        )
+
+        self.conv_block2 = nn.Sequential(
+            nn.Conv2d(
+                in_channels=num_filters,
+                out_channels=num_filters,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=False,
+            ),
+            nn.BatchNorm2d(num_features=num_filters),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        residual = x
+        out = self.conv_block1(x)
+        out = self.conv_block2(out)
+        out += residual
+        out = F.relu(out)
+        return out
 
 
 class GameNetwork(nn.Module):
-    def __init__(self, board_size, device, n_history=3, learning_rate=0.0001, weight_decay=0.0001, value_weight=3.0):
-        """Initialize the neural network.
-        
-        Args:
-            board_size (int): Size of the game board
-            device (torch.device): Device to run the network on
-            n_history (int): Number of historical moves to include for each player
-            learning_rate (float): Learning rate for optimization
-            weight_decay (float): Weight decay for regularization
-            value_weight (float): Weight for the value loss component (higher = more focus on value)
-        """
+    """Policy network for AlphaZero agent."""
+
+    def __init__(
+        self,
+        board_size, device, num_stack=3, learning_rate=0.0001,
+            value_weight=3.0,  weight_decay=0.0001) -> None:
         super().__init__()
-        self.board_size = board_size
         self.device = device
-        num_layers = 4
-        num_channels = 256
-        n = board_size
-        action_size = n ** 2
-        
-        # Calculate input channels: 2 for current state + 2*n_history for move history + 1 for player
-        input_channels = 2 + (2 * n_history) + 1
-        
-        # residual block with parameterized input channels
-        res_list = [ResidualBlock(input_channels, num_channels)] + [ResidualBlock(num_channels, num_channels) for _ in
-                                                       range(num_layers - 1)]
-        self.res_layers = nn.Sequential(*res_list)
+        self.board_size = board_size
 
-        # policy head
-        self.p_conv = nn.Conv2d(num_channels, 4, kernel_size=1, padding=0, bias=False)
-        self.p_bn = nn.BatchNorm2d(num_features=4)
-        self.relu = nn.ReLU(inplace=True)
+        input_shape = (num_stack * 2 + 3, board_size, board_size)
+        num_actions = board_size * board_size
+        num_res_block = 10
+        num_filters = 40
+        num_fc_units = 80
+        c, h, w = input_shape
 
-        self.p_fc = nn.Linear(4 * n ** 2, action_size)
-        self.log_softmax = nn.LogSoftmax(dim=1)
+        # We need to use additional padding for Gomoku to fix agent shortsighted on edge cases
+        num_padding = 3
 
-        # value head
-        self.v_conv = nn.Conv2d(num_channels, 2, kernel_size=1, padding=0, bias=False)
-        self.v_bn = nn.BatchNorm2d(num_features=2)
+        conv_out_hw = calc_conv2d_output((h, w), 3, 1, num_padding)
+        # FIX BUG, Python 3.7 has no math.prod()
+        conv_out = conv_out_hw[0] * conv_out_hw[1]
 
-        self.v_fc1 = nn.Linear(2 * n ** 2, 256)
-        self.v_fc2 = nn.Linear(256, 1)
-        self.tanh = nn.Tanh()
+        # First convolutional block
+        self.conv_block = nn.Sequential(
+            nn.Conv2d(
+                in_channels=c,
+                out_channels=num_filters,
+                kernel_size=3,
+                stride=1,
+                padding=num_padding,
+                bias=False,
+            ),
+            nn.BatchNorm2d(num_features=num_filters),
+            nn.ReLU(),
+        )
 
-        self.optimizer = torch.optim.AdamW(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=50, gamma=0.95)
+        # Residual blocks
+        res_blocks = []
+        for _ in range(num_res_block):
+            res_blocks.append(ResNetBlock(num_filters))
+        self.res_blocks = nn.Sequential(*res_blocks)
+
+        self.policy_head = nn.Sequential(
+            nn.Conv2d(
+                in_channels=num_filters,
+                out_channels=2,
+                kernel_size=1,
+                stride=1,
+                bias=False,
+            ),
+            nn.BatchNorm2d(num_features=2),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(2 * conv_out, num_actions),
+        )
+
+        self.value_head = nn.Sequential(
+            nn.Conv2d(
+                in_channels=num_filters,
+                out_channels=1,
+                kernel_size=1,
+                stride=1,
+                bias=False,
+            ),
+            nn.BatchNorm2d(num_features=1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(1 * conv_out, num_fc_units),
+            nn.ReLU(),
+            nn.Linear(num_fc_units, 1),
+            nn.Tanh(),
+        )
+
+        initialize_weights(self)
         self.alpha_loss = AlphaLoss(value_weight=value_weight)
+        self.optimizer = torch.optim.AdamW(self.parameters(),
+                                           lr=learning_rate, weight_decay=weight_decay)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer,
+                                                         step_size=50, gamma=0.95)
 
-    def forward(self, x):
-        """Forward pass through the network."""
-        # residual block
-        out = self.res_layers(x)
+    def forward(self, x: torch.Tensor) -> NetworkOutputs:
+        """Given raw state x, predict the raw logits probability distribution for all actions,
+        and the evaluated value, all from current player's perspective."""
 
-        # policy head
-        p = self.p_conv(out)
-        p = self.p_bn(p)
-        p = self.relu(p)
+        conv_block_out = self.conv_block(x)
+        features = self.res_blocks(conv_block_out)
 
-        p = self.p_fc(p.view(p.size(0), -1))
-        p = self.log_softmax(p)
+        # Predict raw logits distributions wrt policy
+        pi_logits = self.policy_head(features)
 
-        # value head
-        v = self.v_conv(out)
-        v = self.v_bn(v)
-        v = self.relu(v)
+        # Predict evaluated value from current player's perspective.
+        value = self.value_head(features)
 
-        v = self.v_fc1(v.view(v.size(0), -1))
-        v = self.relu(v)
-        v = self.v_fc2(v)
-        v = self.tanh(v)
-
-        return p, v
+        return pi_logits, value
 
     def predict(self, state):
         """Get policy and value predictions for a game state
@@ -204,7 +270,7 @@ class GameNetwork(nn.Module):
         state = {
             'board_size': self.board_size,
             'state_dict': self.state_dict(),
-            'model_version': '2.0'  # Updated version for CNN architecture
+            'model_version': '3.0'  # Updated version for CNN architecture
         }
         torch.save(state, path)
     
@@ -222,10 +288,7 @@ class GameNetwork(nn.Module):
             print(f"Loaded model version {state.get('model_version', '1.0')} from {path}")
         else:
             print(f"No saved model found at {path}")
-    
 
-
-    
     def train_step(self, state_tensor, policy_tensor, value_tensor):
         """Perform a single training step with debugging for NaN values."""
         self.train()

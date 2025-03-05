@@ -24,9 +24,10 @@ evaluation_frequency = 100
 def initialize_network(value_weight=3.0):
     # Initialize game and network
     # Training parameters
-    learning_rate = 0.001
-    n_history = 3  # Number of historical moves to track
-    network = GameNetwork(BOARD_SIZE, device, n_history=n_history, learning_rate=learning_rate, value_weight=value_weight)
+    learning_rate = 0.01
+    num_stack = 3  # Number of historical states to stack
+
+    network = GameNetwork(board_size=BOARD_SIZE, device=device, num_stack=num_stack, learning_rate=learning_rate)
     network.to(device)  # Ensure the model is on the correct device
     try:
         network.load_model(os.path.join("models", "model_best.pt"))
@@ -267,7 +268,7 @@ def train_from_data_file(value_weight=3.0):
         print("Warning: No data to train on! Skipping training.")
         return network
 
-    num_epochs = 10  # Number of times to shuffle and train on all data
+    num_epochs = 10000  # Number of times to shuffle and train on all data
     num_batches = max(1, len(states_array) // batch_size)  # At least 1 batch
     total_batches = num_batches * num_epochs
 
@@ -631,7 +632,7 @@ def train_model_vs_itself():
 
     learning_rate = 0.001
     n_history = 3  # Number of historical moves to track
-    network = GameNetwork(BOARD_SIZE, device, n_history=n_history, learning_rate=learning_rate)
+    network = AlphaZeroNet(BOARD_SIZE, device, n_history=n_history, learning_rate=learning_rate)
     network.to(device)  # Ensure the model is on the correct device
 
     # Initialize ELO rating system
