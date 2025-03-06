@@ -632,7 +632,7 @@ def train_model_vs_itself():
 
     learning_rate = 0.001
     n_history = 3  # Number of historical moves to track
-    network = AlphaZeroNet(BOARD_SIZE, device, n_history=n_history, learning_rate=learning_rate)
+    network = GameNetwork(BOARD_SIZE, device, n_history=n_history, learning_rate=learning_rate)
     network.to(device)  # Ensure the model is on the correct device
 
     # Initialize ELO rating system
