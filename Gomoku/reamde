@@ -1,0 +1,4 @@
+train_10 network from https://github.com/michaelnny/alpha_zero/blob/main/alpha_zero/core/pipeline.py#L602
+train_9 network from https://github.com/hijkzzz/alpha-zero-gomoku/blob/master/README.md increase history=3
+train_8 network from https://github.com/hijkzzz/alpha-zero-gomoku/blob/master/README.md Add current player to model input
+train_7 network from  https://github.com/hijkzzz/alpha-zero-gomoku/blob/master/README.md history=1 fir time tic_tac_toe working

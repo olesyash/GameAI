@@ -12,7 +12,8 @@ import torch.nn.functional as F
 from gomoku import Gomoku, BOARD_SIZE, BOARD_TENSOR, POLICY_PROBS, STATUS
 import os
 BEST_MODEL_PATH = os.path.join("models", "model_best.pt")
-TIC_TAC_TOE = os.path.join("models", "model_best_tic_tac_toe_v2.pt")
+TIC_TAC_TOE = os.path.join("models", "model_best_tic_tac_toe_v3.pt")
+N_HISTORY = 1
 
 
 class PUCTNode:
@@ -51,7 +52,7 @@ class PUCTPlayer:
         if fake_network:
             self.model = FakeNetwork(board_size=game.board_size)
         else:
-            self.model = GameNetwork(board_size=game.board_size, device=self.device)
+            self.model = GameNetwork(board_size=game.board_size, device=self.device, num_stack=N_HISTORY)
             self.model.to(self.device)
         if model_path is not None:
             if game.board_size == 3 and game.win_count == 3:

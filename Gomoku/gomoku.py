@@ -189,7 +189,7 @@ class Gomoku:
         """Get the winner of the game.
         
         Returns:
-            int or None: Winner (1 for black, 2 for white, None if no winner)
+            int or None: Winner (1 for black, -1 for white, None if no winner)
         """
         return self.winner
 

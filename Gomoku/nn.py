@@ -37,15 +37,17 @@ class AlphaLoss(nn.Module):
         super(AlphaLoss, self).__init__()
         self.value_weight = value_weight
 
-    def forward(self, log_ps, vs, target_ps, target_vs):
-        # Policy cross-entropy loss
-        policy_loss = F.cross_entropy(log_ps, target_ps, reduction='mean')
-
+    def forward(self, policy_logits, value_pred, target_policy, target_value):
+        # Policy loss using KL divergence (via cross entropy)
+        # We need to apply log_softmax to policy_logits to get log probabilities
+        log_probs = policy_logits
+        # target_policy contains the MCTS probabilities
+        # Cross entropy: -sum(target_policy * log_probs)
+        policy_loss = -torch.mean(torch.sum(target_policy * log_probs, dim=1))
+        
         # State value MSE loss
-        value_loss = F.mse_loss(vs.squeeze(), target_vs, reduction='mean')
-        # value_loss = torch.mean(torch.pow(vs - target_vs, 2))
-        # policy_loss = -torch.mean(torch.sum(target_ps * log_ps, 1))
-
+        value_loss = F.mse_loss(value_pred.squeeze(), target_value, reduction='mean')
+        
         # Apply weighting to prioritize value learning if needed
         total_loss = (self.value_weight * value_loss) + policy_loss
 
@@ -131,12 +133,18 @@ class GameNetwork(nn.Module):
         super().__init__()
         self.device = device
         self.board_size = board_size
+        self.n_history = num_stack
 
         input_shape = (num_stack * 2 + 3, board_size, board_size)
         num_actions = board_size * board_size
-        num_res_block = 10
-        num_filters = 40
-        num_fc_units = 80
+        if board_size == 3:
+            num_res_block = 2
+            num_filters = 20
+            num_fc_units = 80
+        else:
+            num_res_block = 10
+            num_filters = 40
+            num_fc_units = 80
         c, h, w = input_shape
 
         # We need to use additional padding for Gomoku to fix agent shortsighted on edge cases
@@ -178,6 +186,7 @@ class GameNetwork(nn.Module):
             nn.ReLU(),
             nn.Flatten(),
             nn.Linear(2 * conv_out, num_actions),
+            nn.LogSoftmax(dim=1),
         )
 
         self.value_head = nn.Sequential(
@@ -201,8 +210,7 @@ class GameNetwork(nn.Module):
         self.alpha_loss = AlphaLoss(value_weight=value_weight)
         self.optimizer = torch.optim.AdamW(self.parameters(),
                                            lr=learning_rate, weight_decay=weight_decay)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer,
-                                                         step_size=50, gamma=0.95)
+        self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=[100, 200, 300], gamma=0.1)
 
     def forward(self, x: torch.Tensor) -> NetworkOutputs:
         """Given raw state x, predict the raw logits probability distribution for all actions,
@@ -232,7 +240,7 @@ class GameNetwork(nn.Module):
         """
         # Prepare state for neural network
         self.eval()
-        board_tensor = state.encode().to(self.device)
+        board_tensor = state.encode(n_history=self.n_history).to(self.device)
         board_tensor = board_tensor.unsqueeze(0)  # Add batch dimension
         
         # Get policy and value predictions

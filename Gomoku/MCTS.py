@@ -6,8 +6,9 @@ import numpy as np
 
 
 class MCTSPlayer:
-    def __init__(self, exploration_weight=2):
+    def __init__(self, exploration_weight=2, train=False):
         self.exploration_weight = exploration_weight
+        self.train = train
 
     def search(self, initial_state, iterations=1000):
         """Performs MCTS to find the best move."""
@@ -22,7 +23,7 @@ class MCTSPlayer:
                 node = self.expand(node)
 
             # 3. Simulation: Simulate a random game from the new node.
-            reward = self.simulate(node)
+            reward = self.simulate(node, self.train)
 
             # 4. Backpropagation: Update the value and visit counts up the tree.
             self.backpropagate(node, reward)
@@ -52,10 +53,19 @@ class MCTSPlayer:
                 return child_node
         raise Exception("No moves to expand")
 
-    def simulate(self, node):
+    def simulate(self, node, train):
         """Simulation phase: Play out the game with a mix of heuristic and random moves."""
         current_state = node.state.clone()
         
+        if train:
+            while not current_state.is_game_over():
+                moves = current_state.legal_moves()
+                if not moves:
+                    break
+                move = random.choice(moves)
+                current_state.make_move(move)
+            return node.get_reward(current_state)
+
         while not current_state.is_game_over():
             moves = current_state.legal_moves()
             

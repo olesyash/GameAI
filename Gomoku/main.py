@@ -1,6 +1,6 @@
 from elo import EloRating
 from evaluate import evaluate_agents
-from puct import PUCTPlayer
+from puct import PUCTPlayer, N_HISTORY
 import torch
 import numpy as np
 from nn import GameNetwork
@@ -15,19 +15,20 @@ from pathlib import Path
 from datetime import datetime
 
 MCTS_ITERATIONS = 1000
-PUCT_ITERATIONS = 1000
+PUCT_ITERATIONS = 7000
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}", flush=True)
-evaluation_frequency = 100
+evaluation_frequency = 10
 
 
-def initialize_network(value_weight=3.0):
+
+def initialize_network(value_weight=1.0,n_history=N_HISTORY):
     # Initialize game and network
     # Training parameters
-    learning_rate = 0.01
-    num_stack = 3  # Number of historical states to stack
+    learning_rate = 0.001
+    num_stack = n_history
 
-    network = GameNetwork(board_size=BOARD_SIZE, device=device, num_stack=num_stack, learning_rate=learning_rate)
+    network = GameNetwork(board_size=BOARD_SIZE, device=device, num_stack=num_stack, learning_rate=learning_rate, value_weight=value_weight)
     network.to(device)  # Ensure the model is on the correct device
     try:
         network.load_model(os.path.join("models", "model_best.pt"))
@@ -204,13 +205,13 @@ def train_model(num_games=1, generate_game_only=False):
                     continue
 
                 # Create batch tensors from shuffled arrays
-                state_batch = torch.stack([shuffled_states[i].encode().to(device) for i in range(start_idx, end_idx)])
+                state_batch = torch.stack([shuffled_states[i].encode(n_history=N_HISTORY).to(device) for i in range(start_idx, end_idx)])
                 policy_batch = torch.stack(
                     [torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)])
                 value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
 
                 # Perform a training step with the batch
-                batch_loss = network.train_step(state_batch, policy_batch, value_batch)
+                batch_loss, _, _  = network.train_step(state_batch, policy_batch, value_batch)
                 epoch_loss += batch_loss
 
             if num_batches > 0:  # Only update loss if we had batches
@@ -244,13 +245,13 @@ def train_model(num_games=1, generate_game_only=False):
     return network
 
 
-def train_from_data_file(value_weight=3.0):
+def train_from_data_file(value_weight=3.0, file_name="training_data.json"):
     best_win_rate = 0
     losses = []
     value_losses = []
     policy_losses = []
-    network = initialize_network(value_weight=value_weight)
-    all_states, all_policies, all_values = load_games()
+    network = initialize_network(value_weight=value_weight, n_history=N_HISTORY)
+    all_states, all_policies, all_values = load_games(file_name)
     start_time = time.time()
 
     # Train once on collected data
@@ -268,7 +269,7 @@ def train_from_data_file(value_weight=3.0):
         print("Warning: No data to train on! Skipping training.")
         return network
 
-    num_epochs = 10000  # Number of times to shuffle and train on all data
+    num_epochs = 100  # Number of times to shuffle and train on all data
     num_batches = max(1, len(states_array) // batch_size)  # At least 1 batch
     total_batches = num_batches * num_epochs
 
@@ -293,7 +294,7 @@ def train_from_data_file(value_weight=3.0):
                 continue
 
             # Create batch tensors from shuffled arrays
-            state_batch = torch.stack([shuffled_states[i].encode().to(device) for i in range(start_idx, end_idx)])
+            state_batch = torch.stack([shuffled_states[i].encode(n_history=N_HISTORY).to(device) for i in range(start_idx, end_idx)])
             policy_batch = torch.stack(
                 [torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)])
             value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
@@ -343,31 +344,54 @@ def evaluate_model(network, num_games=10):
     wins = 0
     draws = 0
     losses = 0
-
+    
+    # Create a higher exploration MCTS for more robust evaluation
     puct = PUCTPlayer(1.0, Gomoku(BOARD_SIZE), model_path=None)
     puct.model = network
     mcts = MCTSPlayer(1.0)
-
+    
+    # Track first-player stats separately
+    first_player_results = {"wins": 0, "draws": 0, "losses": 0}
+    second_player_results = {"wins": 0, "draws": 0, "losses": 0}
+    
     for game_idx in range(num_games):
         if game_idx % 2 == 0:
+            # PUCT plays first
             winner = play_game1(puct, mcts)
+            if winner == 1:  # PUCT wins
+                wins += 1
+                first_player_results["wins"] += 1
+            elif winner == -1:  # MCTS wins
+                losses += 1
+                first_player_results["losses"] += 1
+            else:  # Draw
+                draws += 1
+                first_player_results["draws"] += 1
         else:
+            # MCTS plays first
             winner = play_game2(puct, mcts)
-            winner *= -1
-
-        if winner == 1:  # PUCT wins
-            wins += 1
-        elif winner == -1:  # MCTS wins
-            losses += 1
-        else:  # Draw
-            draws += 1
+            winner *= -1  # Adjust for perspective
+            if winner == 1:  # PUCT wins
+                wins += 1
+                second_player_results["wins"] += 1
+            elif winner == -1:  # MCTS wins
+                losses += 1
+                second_player_results["losses"] += 1
+            else:  # Draw
+                draws += 1
+                second_player_results["draws"] += 1
+                
         print(
             f"Evaluation game {game_idx + 1}: {'PUCT Win' if winner == 1 else 'MCTS Win' if winner == -1 else 'Draw'}",
             flush=True)
-
+    
     win_rate = (wins + 0.5 * draws) / num_games
+    
     print(f"Evaluation complete - Win rate: {win_rate:.2%} (Wins: {wins}, Draws: {draws}, Losses: {losses})",
           flush=True)
+    print(f"When playing first: Wins: {first_player_results['wins']}, Draws: {first_player_results['draws']}, Losses: {first_player_results['losses']}")
+    print(f"When playing second: Wins: {second_player_results['wins']}, Draws: {second_player_results['draws']}, Losses: {second_player_results['losses']}")
+    
     return win_rate
 
 
@@ -521,15 +545,19 @@ def load_games(filename="training_data.json"):
     # Track unique games by their moves
     unique_games = {}
     duplicates = 0
+    skipped = 0
     
     for game_data in all_data:
         # Create a unique key for this game based on its moves
         moves_key = str(game_data["moves"])
-        
-        # Skip duplicate games
-        if moves_key in unique_games:
-            duplicates += 1
+        if BOARD_SIZE != game_data.get("board_size"):
+            skipped +=1
             continue
+        
+        # # Skip duplicate games
+        # if moves_key in unique_games:
+        #     duplicates += 1
+        #     continue
             
         # Mark this game as processed
         unique_games[moves_key] = True
@@ -559,7 +587,8 @@ def load_games(filename="training_data.json"):
     print(f"Successfully loaded {len(all_states)} states from {len(unique_games)} unique games")
     if duplicates > 0:
         print(f"Skipped {duplicates} duplicate games")
-    
+    if skipped > 0:
+        print(f"Skipped {skipped} games with different board size")
     return all_states, all_policies, all_values
 
 
@@ -647,7 +676,6 @@ def train_model_vs_itself():
     # Training parameters
     num_episodes = 100
     evaluation_frequency = 20  # Evaluate every N episodes
-    puct_iterations = 1600  # Iterations for PUCT search
     losses = []
 
     # Initialize replay buffer with maximum size
@@ -683,7 +711,7 @@ def train_model_vs_itself():
             current_puct = puct1 if game.next_player == BLACK else puct2
 
             # Get move and root node from PUCT search
-            move, root = current_puct.best_move(game, puct_iterations, is_training=True)
+            move, root = current_puct.best_move(game, PUCT_ITERATIONS, is_training=True)
 
             if move is None:
                 break
@@ -776,7 +804,7 @@ def train_model_vs_itself():
                     continue
 
                 # Create batch tensors from shuffled arrays
-                state_batch = torch.stack([shuffled_states[i].encode().to(device) for i in range(start_idx, end_idx)])
+                state_batch = torch.stack([shuffled_states[i].encode(n_history=n_history).to(device) for i in range(start_idx, end_idx)])
                 policy_batch = torch.stack(
                     [torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)])
                 value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
@@ -874,6 +902,39 @@ def plot_elo_history(elo_system, save_path="plots/elo_history.png"):
     print(f"ELO history plot saved to: {save_path}")
 
 
+def inspect_training_data(filename="training_data.json"):
+    """Analyze the quality of training data for Tic-Tac-Toe."""
+    all_states, all_policies, all_values = load_games(filename)
+    
+    # Count state values distribution
+    win_count = sum(1 for v in all_values if v > 0.5)
+    loss_count = sum(1 for v in all_values if v < -0.5)
+    draw_count = len(all_values) - win_count - loss_count
+    
+    print(f"\nTraining data analysis:")
+    print(f"Total states: {len(all_states)}")
+    print(f"Win states: {win_count} ({win_count/len(all_states):.1%})")
+    print(f"Loss states: {loss_count} ({loss_count/len(all_states):.1%})")
+    print(f"Draw states: {draw_count} ({draw_count/len(all_states):.1%})")
+    
+    # Check policy distributions - measure entropy to see how focused they are
+    policy_entropy = [-np.sum(p * np.log(p + 1e-10)) for p in all_policies]
+    avg_entropy = np.mean(policy_entropy)
+    max_entropy = np.log(BOARD_SIZE * BOARD_SIZE)  # Maximum possible entropy
+    
+    print(f"Average policy entropy: {avg_entropy:.4f} (normalized: {avg_entropy/max_entropy:.2%})")
+    
+    # Check how many unique board patterns we have
+    unique_boards = set()
+    for state in all_states:
+        board_str = ''.join(str(int(x)) for x in np.reshape(state.board, -1))
+        unique_boards.add(board_str)
+    
+    print(f"Unique board patterns: {len(unique_boards)}")
+    
+    return all_states, all_policies, all_values
+
+
 if __name__ == "__main__":
     # Set random seed for reproducibility
     torch.manual_seed(42)
@@ -885,8 +946,14 @@ if __name__ == "__main__":
     # Train the model using self-play with PUCT
     #trained_network = train_model_vs_itself()
     # Generate games data only
-    train_model(num_games=100, generate_game_only=True)
-    trained_network = train_from_data_file(value_weight=3.0)
+    train_model(num_games=200, generate_game_only=False)
+    
+    # # Analyze the training data
+    # inspect_training_data()
+    #
+    # # Train on the data
+    # trained_network = train_from_data_file(value_weight=3.0)
+    
 
     # Final evaluation
     # print("\nFinal model evaluation:", flush=True)
