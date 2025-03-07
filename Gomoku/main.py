@@ -14,14 +14,16 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-MCTS_ITERATIONS = 7000
-PUCT_ITERATIONS = 7000
+TRAIN_MCTS_ITERATIONS = 1600  # Reduced for faster training
+EVAL_MCTS_ITERATIONS = 7000   # Keep high for strong evaluation
+TRAIN_PUCT_ITERATIONS = 1600
+EVAL_PUCT_ITERATIONS = 7000
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}", flush=True)
-evaluation_frequency = 100
+evaluation_frequency = 20  # More frequent evaluation
 
 
-def initialize_network(value_weight=3.0):
+def initialize_network(value_weight=1.0):
     # Initialize game and network
     # Training parameters
     learning_rate = 0.001
@@ -79,7 +81,7 @@ def train_model(num_games=1, generate_game_only=False):
         # Play one game
         while not game.is_game_over():
             # Get move from MCTS
-            best_node1, root1 = mcts1.search(game, iterations=MCTS_ITERATIONS)
+            best_node1, root1 = mcts1.search(game, iterations=TRAIN_MCTS_ITERATIONS)
 
             # Store state and Q-value from MCTS (from Black's perspective)
             current_state = game.clone()
@@ -107,7 +109,7 @@ def train_model(num_games=1, generate_game_only=False):
                 break
 
             # Get move from MCTS for player 2
-            best_node2, root2 = mcts2.search(game, iterations=MCTS_ITERATIONS)
+            best_node2, root2 = mcts2.search(game, iterations=TRAIN_MCTS_ITERATIONS)
 
             # Store state and Q-value from MCTS
             current_state = game.clone()
@@ -243,7 +245,7 @@ def train_model(num_games=1, generate_game_only=False):
     return network
 
 
-def train_from_data_file(value_weight=3.0):
+def train_from_data_file(value_weight=1.0):
     best_win_rate = 0
     losses = []
     value_losses = []
@@ -567,7 +569,7 @@ def play_game1(puct, mcts):
     game = Gomoku(BOARD_SIZE)
 
     while not game.is_game_over():
-        state, best_node = puct.best_move(game, iterations=PUCT_ITERATIONS)
+        state, best_node = puct.best_move(game, iterations=EVAL_PUCT_ITERATIONS)
         if not state:  # Add check for None
             break
         move1 = state.last_move
@@ -575,7 +577,7 @@ def play_game1(puct, mcts):
         if game.is_game_over():
             break
 
-        best_node, root = mcts.search(game, iterations=MCTS_ITERATIONS)
+        best_node, root = mcts.search(game, iterations=EVAL_MCTS_ITERATIONS)
         if not best_node:  # Add check for None
             break
         move2 = best_node.state.last_move
@@ -597,7 +599,7 @@ def play_game2(puct, mcts):
     game = Gomoku(BOARD_SIZE)
 
     while not game.is_game_over():
-        best_node, root = mcts.search(game, iterations=MCTS_ITERATIONS)
+        best_node, root = mcts.search(game, iterations=EVAL_MCTS_ITERATIONS)
         if not best_node:  # Add check for None
             break
         move1 = best_node.state.last_move
@@ -606,7 +608,7 @@ def play_game2(puct, mcts):
         if game.is_game_over():
             break
 
-        state, best_node = puct.best_move(game, iterations=PUCT_ITERATIONS)
+        state, best_node = puct.best_move(game, iterations=EVAL_PUCT_ITERATIONS)
         if not state:
             break
         move2 = state.last_move
@@ -884,8 +886,8 @@ if __name__ == "__main__":
     # Train the model using self-play with PUCT
     #trained_network = train_model_vs_itself()
     # Generate games data only
-    # train_model(num_games=10000, generate_game_only=True)
-    trained_network = train_from_data_file(value_weight=3.0)
+    #train_model(num_games=10000, generate_game_only=True)
+    trained_network = train_from_data_file(value_weight=1.0)
 
     # Final evaluation
     # print("\nFinal model evaluation:", flush=True)

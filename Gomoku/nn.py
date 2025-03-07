@@ -81,7 +81,7 @@ class AlphaLoss(nn.Module):
 
 
 class GameNetwork(nn.Module):
-    def __init__(self, board_size, device, n_history=3, learning_rate=0.0001, weight_decay=0.0001, value_weight=3.0):
+    def __init__(self, board_size, device, n_history=3, learning_rate=0.001, weight_decay=0.001, value_weight=1.0):
         """Initialize the neural network.
         
         Args:
@@ -95,8 +95,8 @@ class GameNetwork(nn.Module):
         super().__init__()
         self.board_size = board_size
         self.device = device
-        num_layers = 4
-        num_channels = 256
+        num_layers = 6
+        num_channels = 128
         n = board_size
         action_size = n ** 2
         
@@ -108,24 +108,25 @@ class GameNetwork(nn.Module):
                                                        range(num_layers - 1)]
         self.res_layers = nn.Sequential(*res_list)
 
-        # policy head
-        self.p_conv = nn.Conv2d(num_channels, 4, kernel_size=1, padding=0, bias=False)
-        self.p_bn = nn.BatchNorm2d(num_features=4)
+        # policy head - increase channels for better move selection
+        self.p_conv = nn.Conv2d(num_channels, 8, kernel_size=1, padding=0, bias=False)  # Increased from 4 to 8
+        self.p_bn = nn.BatchNorm2d(num_features=8)
         self.relu = nn.ReLU(inplace=True)
 
-        self.p_fc = nn.Linear(4 * n ** 2, action_size)
+        self.p_fc = nn.Linear(8 * n ** 2, action_size)  # Adjusted for increased channels
         self.log_softmax = nn.LogSoftmax(dim=1)
 
-        # value head
-        self.v_conv = nn.Conv2d(num_channels, 2, kernel_size=1, padding=0, bias=False)
-        self.v_bn = nn.BatchNorm2d(num_features=2)
+        # value head - deeper value network
+        self.v_conv = nn.Conv2d(num_channels, 4, kernel_size=1, padding=0, bias=False)  # Increased from 2 to 4
+        self.v_bn = nn.BatchNorm2d(num_features=4)
 
-        self.v_fc1 = nn.Linear(2 * n ** 2, 256)
-        self.v_fc2 = nn.Linear(256, 1)
+        self.v_fc1 = nn.Linear(4 * n ** 2, 512)  # Increased from 256 to 512
+        self.v_fc2 = nn.Linear(512, 256)  # Added intermediate layer
+        self.v_fc3 = nn.Linear(256, 1)  # Added final layer
         self.tanh = nn.Tanh()
 
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=50, gamma=0.95)
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=5, verbose=True)  # Changed to ReduceLROnPlateau
         self.alpha_loss = AlphaLoss(value_weight=value_weight)
 
     def forward(self, x):
@@ -149,6 +150,8 @@ class GameNetwork(nn.Module):
         v = self.v_fc1(v.view(v.size(0), -1))
         v = self.relu(v)
         v = self.v_fc2(v)
+        v = self.relu(v)
+        v = self.v_fc3(v)
         v = self.tanh(v)
 
         return p, v
@@ -204,7 +207,7 @@ class GameNetwork(nn.Module):
         state = {
             'board_size': self.board_size,
             'state_dict': self.state_dict(),
-            'model_version': '2.0'  # Updated version for CNN architecture
+            'model_version': '4.0'  # Updated version for CNN architecture
         }
         torch.save(state, path)
     
