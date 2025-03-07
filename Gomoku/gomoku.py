@@ -7,8 +7,8 @@ ONGOING = -17
 BLACK_WIN = BLACK = 1
 WHITE_WIN = WHITE = -1
 DRAW = 0
-WIN_COUNT = 4
-BOARD_SIZE = 6
+WIN_COUNT = 3
+BOARD_SIZE = 3
 BOARD_TENSOR = "board_tensor"
 POLICY_PROBS = "policy_probs"
 STATUS = "status"

@@ -14,8 +14,8 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-MCTS_ITERATIONS = 7000
-PUCT_ITERATIONS = 7000
+MCTS_ITERATIONS = 1000
+PUCT_ITERATIONS = 1000
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}", flush=True)
 evaluation_frequency = 100
@@ -885,7 +885,7 @@ if __name__ == "__main__":
     # Train the model using self-play with PUCT
     #trained_network = train_model_vs_itself()
     # Generate games data only
-    # train_model(num_games=10000, generate_game_only=True)
+    train_model(num_games=100, generate_game_only=True)
     trained_network = train_from_data_file(value_weight=3.0)
 
     # Final evaluation
