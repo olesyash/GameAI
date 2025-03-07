@@ -1,6 +1,6 @@
 from elo import EloRating
 from evaluate import evaluate_agents
-from puct import PUCTPlayer
+from puct import PUCTPlayer, N_HISTORY
 import torch
 import numpy as np
 from nn import GameNetwork
@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 
+
 TRAIN_MCTS_ITERATIONS = 1600  # Reduced for faster training
 EVAL_MCTS_ITERATIONS = 7000   # Keep high for strong evaluation
 TRAIN_PUCT_ITERATIONS = 1600
@@ -23,12 +24,12 @@ print(f"Using device: {device}", flush=True)
 evaluation_frequency = 20  # More frequent evaluation
 
 
+
 def initialize_network(value_weight=1.0):
     # Initialize game and network
     # Training parameters
     learning_rate = 0.001
-    n_history = 3  # Number of historical moves to track
-    network = GameNetwork(BOARD_SIZE, device, n_history=n_history, learning_rate=learning_rate, value_weight=value_weight)
+    network = GameNetwork(BOARD_SIZE, device, n_history=N_HISTORY, learning_rate=learning_rate, value_weight=value_weight)
     network.to(device)  # Ensure the model is on the correct device
     try:
         network.load_model(os.path.join("models", "model_best.pt"))
@@ -205,7 +206,7 @@ def train_model(num_games=1, generate_game_only=False):
                     continue
 
                 # Create batch tensors from shuffled arrays
-                state_batch = torch.stack([shuffled_states[i].encode().to(device) for i in range(start_idx, end_idx)])
+                state_batch = torch.stack([shuffled_states[i].encode(N_HISTORY).to(device) for i in range(start_idx, end_idx)])
                 policy_batch = torch.stack(
                     [torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)])
                 value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
@@ -269,7 +270,7 @@ def train_from_data_file(value_weight=1.0):
         print("Warning: No data to train on! Skipping training.")
         return network
 
-    num_epochs = 10  # Number of times to shuffle and train on all data
+    num_epochs = 1000  # Number of times to shuffle and train on all data
     num_batches = max(1, len(states_array) // batch_size)  # At least 1 batch
     total_batches = num_batches * num_epochs
 
@@ -294,7 +295,7 @@ def train_from_data_file(value_weight=1.0):
                 continue
 
             # Create batch tensors from shuffled arrays
-            state_batch = torch.stack([shuffled_states[i].encode().to(device) for i in range(start_idx, end_idx)])
+            state_batch = torch.stack([shuffled_states[i].encode(N_HISTORY).to(device) for i in range(start_idx, end_idx)])
             policy_batch = torch.stack(
                 [torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)])
             value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
@@ -777,7 +778,7 @@ def train_model_vs_itself():
                     continue
 
                 # Create batch tensors from shuffled arrays
-                state_batch = torch.stack([shuffled_states[i].encode().to(device) for i in range(start_idx, end_idx)])
+                state_batch = torch.stack([shuffled_states[i].encode(N_HISTORY).to(device) for i in range(start_idx, end_idx)])
                 policy_batch = torch.stack(
                     [torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)])
                 value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)

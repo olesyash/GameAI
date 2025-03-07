@@ -7,7 +7,7 @@ import os
 
 import torch.nn as nn
 import torch.nn.functional as F
-
+import torch.optim as optim
 
 
 def conv3x3(in_channels, out_channels, stride=1):
@@ -81,7 +81,7 @@ class AlphaLoss(nn.Module):
 
 
 class GameNetwork(nn.Module):
-    def __init__(self, board_size, device, n_history=3, learning_rate=0.001, weight_decay=0.001, value_weight=1.0):
+    def __init__(self, board_size, device, n_history=3, learning_rate=0.001, value_weight=1.0):
         """Initialize the neural network.
         
         Args:
@@ -89,70 +89,83 @@ class GameNetwork(nn.Module):
             device (torch.device): Device to run the network on
             n_history (int): Number of historical moves to include for each player
             learning_rate (float): Learning rate for optimization
-            weight_decay (float): Weight decay for regularization
             value_weight (float): Weight for the value loss component (higher = more focus on value)
         """
         super().__init__()
         self.board_size = board_size
         self.device = device
-        num_layers = 6
-        num_channels = 128
-        n = board_size
-        action_size = n ** 2
+        self.n_history = n_history
+        self.value_weight = value_weight
         
-        # Calculate input channels: 2 for current state + 2*n_history for move history + 1 for player
-        input_channels = 2 + (2 * n_history) + 1
+        # Network architecture
+        # Input channels: 2 players * n_history moves + 1 current player + 2 current boards
+        self.input_channels = (2 * n_history) + 3
+        self.num_channels = 128
+        self.num_res_blocks = 6
         
-        # residual block with parameterized input channels
-        res_list = [ResidualBlock(input_channels, num_channels)] + [ResidualBlock(num_channels, num_channels) for _ in
-                                                       range(num_layers - 1)]
-        self.res_layers = nn.Sequential(*res_list)
-
-        # policy head - increase channels for better move selection
-        self.p_conv = nn.Conv2d(num_channels, 8, kernel_size=1, padding=0, bias=False)  # Increased from 4 to 8
-        self.p_bn = nn.BatchNorm2d(num_features=8)
-        self.relu = nn.ReLU(inplace=True)
-
-        self.p_fc = nn.Linear(8 * n ** 2, action_size)  # Adjusted for increased channels
-        self.log_softmax = nn.LogSoftmax(dim=1)
-
-        # value head - deeper value network
-        self.v_conv = nn.Conv2d(num_channels, 4, kernel_size=1, padding=0, bias=False)  # Increased from 2 to 4
-        self.v_bn = nn.BatchNorm2d(num_features=4)
-
-        self.v_fc1 = nn.Linear(4 * n ** 2, 512)  # Increased from 256 to 512
-        self.v_fc2 = nn.Linear(512, 256)  # Added intermediate layer
-        self.v_fc3 = nn.Linear(256, 1)  # Added final layer
-        self.tanh = nn.Tanh()
-
-        self.optimizer = torch.optim.AdamW(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=5, verbose=True)  # Changed to ReduceLROnPlateau
-        self.alpha_loss = AlphaLoss(value_weight=value_weight)
+        # Input layers
+        self.conv1 = nn.Conv2d(self.input_channels, self.num_channels, 3, padding=1)
+        self.bn1 = nn.BatchNorm2d(self.num_channels)
+        
+        # Residual blocks
+        self.res_blocks = nn.ModuleList([
+            ResidualBlock(self.num_channels, self.num_channels) for _ in range(self.num_res_blocks)
+        ])
+        
+        # Policy head
+        self.policy_conv = nn.Conv2d(self.num_channels, 8, 1)
+        self.policy_bn = nn.BatchNorm2d(8)
+        self.policy_fc = nn.Linear(8 * board_size * board_size, board_size * board_size)
+        
+        # Value head
+        self.value_conv = nn.Conv2d(self.num_channels, 4, 1)
+        self.value_bn = nn.BatchNorm2d(4)
+        self.value_fc1 = nn.Linear(4 * board_size * board_size, 512)
+        self.value_fc2 = nn.Linear(512, 1)
+        
+        # Loss function
+        self.loss_fn = AlphaLoss(value_weight)
+        
+        # Optimizer
+        self.optimizer = optim.Adam(self.parameters(), lr=learning_rate, weight_decay=0.001)
+        
+        # Learning rate scheduler
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, 
+            mode='min',
+            factor=0.5,
+            patience=5,
+            verbose=True
+        )
+        
+        self.to(device)
 
     def forward(self, x):
         """Forward pass through the network."""
         # residual block
-        out = self.res_layers(x)
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = F.relu(out)
+        for block in self.res_blocks:
+            out = block(out)
 
         # policy head
-        p = self.p_conv(out)
-        p = self.p_bn(p)
-        p = self.relu(p)
+        p = self.policy_conv(out)
+        p = self.policy_bn(p)
+        p = F.relu(p)
 
-        p = self.p_fc(p.view(p.size(0), -1))
-        p = self.log_softmax(p)
+        p = self.policy_fc(p.view(p.size(0), -1))
+        p = F.log_softmax(p, dim=1)
 
         # value head
-        v = self.v_conv(out)
-        v = self.v_bn(v)
-        v = self.relu(v)
+        v = self.value_conv(out)
+        v = self.value_bn(v)
+        v = F.relu(v)
 
-        v = self.v_fc1(v.view(v.size(0), -1))
-        v = self.relu(v)
-        v = self.v_fc2(v)
-        v = self.relu(v)
-        v = self.v_fc3(v)
-        v = self.tanh(v)
+        v = self.value_fc1(v.view(v.size(0), -1))
+        v = F.relu(v)
+        v = self.value_fc2(v)
+        v = F.tanh(v)
 
         return p, v
 
@@ -174,7 +187,7 @@ class GameNetwork(nn.Module):
         
         # Get policy and value predictions
         with torch.no_grad():
-            policy, value = self.forward(board_tensor)
+            policy, value = self(board_tensor)
 
             # Convert to probabilities because log_softmax returns log probabilities
             policy = torch.exp(policy)
@@ -241,7 +254,7 @@ class GameNetwork(nn.Module):
             print(" WARNING: NaN detected in forward pass!")
             return float('nan')  # Prevents corrupt training updates
 
-        loss, value_loss, policy_loss = self.alpha_loss(predicted_policy, predicted_value, policy_tensor, value_tensor)
+        loss, value_loss, policy_loss = self.loss_fn(predicted_policy, predicted_value, policy_tensor, value_tensor)
         # Backward pass
         self.optimizer.zero_grad()
         loss.backward()
@@ -249,6 +262,6 @@ class GameNetwork(nn.Module):
         self.optimizer.step()
         
         # Update learning rate
-        self.scheduler.step()
+        self.scheduler.step(loss.item())
 
         return loss.item(), value_loss.item(), policy_loss.item()
