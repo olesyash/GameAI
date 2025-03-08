@@ -64,10 +64,9 @@ def evaluate_agents(agent1, agent2, agent1_name: str, agent2_name: str,
         # Alternate which agent plays black
         if game_num % 2 == 0:
             first_agent, second_agent = agent1, agent2
-            first_name, second_name = agent1_name, agent2_name
         else:
             first_agent, second_agent = agent2, agent1
-            first_name, second_name = agent2_name, agent1_name
+     
 
         winner, _ = play_evaluation_game(first_agent, second_agent, board_size)
 

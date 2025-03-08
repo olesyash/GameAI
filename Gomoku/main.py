@@ -653,6 +653,8 @@ def train_model_vs_itself():
     evaluation_frequency = 20  # Evaluate every N episodes
     puct_iterations = 1600  # Iterations for PUCT search
     losses = []
+    value_losses = []  # Track value losses separately
+    policy_losses = []  # Track policy losses separately
 
     # Initialize replay buffer with maximum size
     max_buffer_size = 5000  # Limit buffer size to prevent old experiences from dominating
@@ -770,6 +772,8 @@ def train_model_vs_itself():
             shuffled_values = values_array[shuffle_indices]
 
             epoch_loss = 0
+            epoch_value_loss = 0  # Track value loss for this epoch
+            epoch_policy_loss = 0  # Track policy loss for this epoch
 
             for batch_idx in range(num_batches):
                 start_idx = batch_idx * batch_size
@@ -787,28 +791,41 @@ def train_model_vs_itself():
                 value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
 
                 # Perform a training step with the batch
-                batch_loss = network.train_step(state_batch, policy_batch, value_batch)
+                batch_loss, batch_value_loss, batch_policy_loss = network.train_step(state_batch, policy_batch, value_batch)
                 epoch_loss += batch_loss
+                epoch_value_loss += batch_value_loss  # Accumulate value loss
+                epoch_policy_loss += batch_policy_loss  # Accumulate policy loss
 
             if num_batches > 0:  # Only update loss if we had batches
-                avg_loss += epoch_loss / total_batches
-                print(f"Episode {episode + 1}, Epoch {epoch + 1}/{num_epochs}, Loss: {epoch_loss / num_batches:.4f}",
+                avg_loss = epoch_loss / num_batches
+                avg_value_loss = epoch_value_loss / num_batches  # Calculate average value loss
+                avg_policy_loss = epoch_policy_loss / num_batches  # Calculate average policy loss
+                
+                print(f"Episode {episode + 1}, Epoch {epoch + 1}/{num_epochs}, "
+                      f"Loss: {avg_loss:.4f}, Value Loss: {avg_value_loss:.4f}, Policy Loss: {avg_policy_loss:.4f}",
                       flush=True)
 
-        losses.append(avg_loss)  # Store loss
+        # Store losses
+        if num_batches > 0:
+            losses.append(avg_loss)  # Store combined loss
+            value_losses.append(avg_value_loss)  # Store value loss
+            policy_losses.append(avg_policy_loss)  # Store policy loss
 
-        print(f"Episode {episode + 1}, Average Loss: {avg_loss:.4f}", flush=True)
+        print(f"Episode {episode + 1}, Average Loss: {avg_loss:.4f}, "
+              f"Value Loss: {avg_value_loss:.4f}, Policy Loss: {avg_policy_loss:.4f}", flush=True)
 
         # Save latest model and plot loss
         network.save_model("models/model_latest.pt")
         if (episode + 1) % 10 == 0:
-            plot_training_loss(losses)
+            plot_training_loss(losses, value_losses, policy_losses)
 
         # Periodic evaluation and model saving
         if (episode + 1) % evaluation_frequency == 0:
             # Evaluate against previous best model periodically
             print(f"\nEpisode {episode + 1}/{num_episodes}")
             print(f"Average loss: {np.mean(losses[-100:]) if losses else 'N/A'}")
+            print(f"Average value loss: {np.mean(value_losses[-100:]) if value_losses else 'N/A'}")
+            print(f"Average policy loss: {np.mean(policy_losses[-100:]) if policy_losses else 'N/A'}")
 
             # Use evaluate.py to play games between current and previous model
             current_agent = PUCTPlayer(base_exploration, game)
@@ -839,7 +856,7 @@ def train_model_vs_itself():
 
             # Update plots
             if losses:
-                plot_training_loss(losses)
+                plot_training_loss(losses, value_losses, policy_losses)
             plot_elo_history(elo_system)
 
     return network
@@ -888,10 +905,11 @@ if __name__ == "__main__":
 
     # Comment out the following lines when running the test
     # Train the model using self-play with PUCT
-    #trained_network = train_model_vs_itself()
+    # trained_network = train_model_vs_itself()
     # Generate games data only
-    train_model(num_games=100, generate_game_only=False)
+    # train_model(num_games=100, generate_game_only=False)
     # trained_network = train_from_data_file(value_weight=1.0)
+    train_model_vs_itself()
 
     # Final evaluation
     # print("\nFinal model evaluation:", flush=True)
