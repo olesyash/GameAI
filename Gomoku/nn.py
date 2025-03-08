@@ -95,6 +95,7 @@ class GameNetwork(nn.Module):
         super().__init__()
         self.board_size = board_size
         self.device = device
+        self.n_history = n_history
         num_layers = 4
         num_channels = 256
         n = board_size
@@ -166,7 +167,7 @@ class GameNetwork(nn.Module):
         """
         # Prepare state for neural network
         self.eval()
-        board_tensor = state.encode().to(self.device)
+        board_tensor = state.encode(self.n_history).to(self.device)
         board_tensor = board_tensor.unsqueeze(0)  # Add batch dimension
         
         # Get policy and value predictions

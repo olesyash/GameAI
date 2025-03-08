@@ -1,32 +1,30 @@
 from elo import EloRating
 from evaluate import evaluate_agents
-from puct import PUCTPlayer
+from puct import PUCTPlayer, N_HISTORY
 import torch
 import numpy as np
 from nn import GameNetwork
 from gomoku import BOARD_SIZE, Gomoku, BLACK, WHITE
 import matplotlib.pyplot as plt
 import os
-import re
 from MCTS import MCTSPlayer
 import time
 import json
-from pathlib import Path
 from datetime import datetime
 
 MCTS_ITERATIONS = 7000
 PUCT_ITERATIONS = 7000
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}", flush=True)
-evaluation_frequency = 100
+evaluation_frequency = 20  # More frequent evaluation
 
 
-def initialize_network(value_weight=3.0):
+def initialize_network(value_weight=1.0):
     # Initialize game and network
     # Training parameters
     learning_rate = 0.001
-    n_history = 3  # Number of historical moves to track
-    network = GameNetwork(BOARD_SIZE, device, n_history=n_history, learning_rate=learning_rate, value_weight=value_weight)
+    network = GameNetwork(BOARD_SIZE, device, n_history=N_HISTORY, learning_rate=learning_rate,
+                          value_weight=value_weight)
     network.to(device)  # Ensure the model is on the correct device
     try:
         network.load_model(os.path.join("models", "model_best.pt"))
@@ -203,13 +201,14 @@ def train_model(num_games=1, generate_game_only=False):
                     continue
 
                 # Create batch tensors from shuffled arrays
-                state_batch = torch.stack([shuffled_states[i].encode().to(device) for i in range(start_idx, end_idx)])
+                state_batch = torch.stack(
+                    [shuffled_states[i].encode(N_HISTORY).to(device) for i in range(start_idx, end_idx)])
                 policy_batch = torch.stack(
                     [torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)])
                 value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
 
                 # Perform a training step with the batch
-                batch_loss = network.train_step(state_batch, policy_batch, value_batch)
+                batch_loss, _, _ = network.train_step(state_batch, policy_batch, value_batch)
                 epoch_loss += batch_loss
 
             if num_batches > 0:  # Only update loss if we had batches
@@ -243,13 +242,13 @@ def train_model(num_games=1, generate_game_only=False):
     return network
 
 
-def train_from_data_file(value_weight=3.0):
+def train_from_data_file(value_weight=1.0):
     best_win_rate = 0
     losses = []
     value_losses = []
     policy_losses = []
     network = initialize_network(value_weight=value_weight)
-    all_states, all_policies, all_values = load_games()
+    all_states, all_policies, all_values = load_games("training_data_v1.json")
     start_time = time.time()
 
     # Train once on collected data
@@ -267,7 +266,7 @@ def train_from_data_file(value_weight=3.0):
         print("Warning: No data to train on! Skipping training.")
         return network
 
-    num_epochs = 10  # Number of times to shuffle and train on all data
+    num_epochs = 100  # Number of times to shuffle and train on all data
     num_batches = max(1, len(states_array) // batch_size)  # At least 1 batch
     total_batches = num_batches * num_epochs
 
@@ -292,7 +291,8 @@ def train_from_data_file(value_weight=3.0):
                 continue
 
             # Create batch tensors from shuffled arrays
-            state_batch = torch.stack([shuffled_states[i].encode().to(device) for i in range(start_idx, end_idx)])
+            state_batch = torch.stack(
+                [shuffled_states[i].encode(N_HISTORY).to(device) for i in range(start_idx, end_idx)])
             policy_batch = torch.stack(
                 [torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)])
             value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
@@ -307,12 +307,14 @@ def train_from_data_file(value_weight=3.0):
             avg_epoch_loss = epoch_loss / num_batches
             avg_value_loss = epoch_value_loss / num_batches
             avg_policy_loss = epoch_policy_loss / num_batches
-            
+
             losses.append(avg_epoch_loss)  # Store loss for this epoch
             value_losses.append(avg_value_loss)
             policy_losses.append(avg_policy_loss)
-            
-            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_epoch_loss:.4f}, Value Loss: {avg_value_loss:.4f}, Policy Loss: {avg_policy_loss:.4f}", flush=True)
+
+            print(
+                f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_epoch_loss:.4f}, Value Loss: {avg_value_loss:.4f}, Policy Loss: {avg_policy_loss:.4f}",
+                flush=True)
 
         # Save latest model and plot loss
         network.save_model("models/model_latest.pt")
@@ -374,7 +376,7 @@ def plot_training_loss(losses, value_losses=None, policy_losses=None):
     """Plot the training loss history"""
     # Create plots directory if it doesn't exist
     os.makedirs('plots', exist_ok=True)
-    
+
     # Plot combined loss
     plt.figure(figsize=(10, 6))
     plt.plot(losses, label='Combined Loss')
@@ -383,12 +385,12 @@ def plot_training_loss(losses, value_losses=None, policy_losses=None):
     plt.title('Combined Training Loss Over Time')
     plt.grid(True)
     plt.legend()
-    
+
     # Save the plot
     save_path = os.path.join('plots', 'training_loss.png')
     plt.savefig(save_path)
     plt.close()
-    
+
     # Plot separate value and policy losses if available
     if value_losses and policy_losses:
         # Value loss plot
@@ -402,7 +404,7 @@ def plot_training_loss(losses, value_losses=None, policy_losses=None):
         value_path = os.path.join('plots', 'value_loss.png')
         plt.savefig(value_path)
         plt.close()
-        
+
         # Policy loss plot
         plt.figure(figsize=(10, 6))
         plt.plot(policy_losses, label='Policy Loss', color='green')
@@ -414,7 +416,7 @@ def plot_training_loss(losses, value_losses=None, policy_losses=None):
         policy_path = os.path.join('plots', 'policy_loss.png')
         plt.savefig(policy_path)
         plt.close()
-        
+
         print(f"Loss plots saved to: {os.path.abspath('plots')}", flush=True)
     else:
         print(f"Combined loss plot saved to: {os.path.abspath(save_path)}", flush=True)
@@ -516,23 +518,26 @@ def load_games(filename="training_data.json"):
     all_states = []
     all_policies = []
     all_values = []
-    
+
     # Track unique games by their moves
     unique_games = {}
     duplicates = 0
-    
+
     for game_data in all_data:
         # Create a unique key for this game based on its moves
         moves_key = str(game_data["moves"])
-        
+
         # Skip duplicate games
         if moves_key in unique_games:
             duplicates += 1
             continue
-            
+
+        if game_data["board_size"] != BOARD_SIZE:
+            continue
+
         # Mark this game as processed
         unique_games[moves_key] = True
-        
+
         # For each move in the game, create a state
         game = Gomoku(board_size=game_data["board_size"])
         moves_so_far = []  # Keep track of moves to restore game state
@@ -558,7 +563,7 @@ def load_games(filename="training_data.json"):
     print(f"Successfully loaded {len(all_states)} states from {len(unique_games)} unique games")
     if duplicates > 0:
         print(f"Skipped {duplicates} duplicate games")
-    
+
     return all_states, all_policies, all_values
 
 
@@ -775,7 +780,8 @@ def train_model_vs_itself():
                     continue
 
                 # Create batch tensors from shuffled arrays
-                state_batch = torch.stack([shuffled_states[i].encode().to(device) for i in range(start_idx, end_idx)])
+                state_batch = torch.stack(
+                    [shuffled_states[i].encode(N_HISTORY).to(device) for i in range(start_idx, end_idx)])
                 policy_batch = torch.stack(
                     [torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)])
                 value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
@@ -884,8 +890,8 @@ if __name__ == "__main__":
     # Train the model using self-play with PUCT
     #trained_network = train_model_vs_itself()
     # Generate games data only
-    # train_model(num_games=10000, generate_game_only=True)
-    trained_network = train_from_data_file(value_weight=3.0)
+    train_model(num_games=100, generate_game_only=False)
+    # trained_network = train_from_data_file(value_weight=1.0)
 
     # Final evaluation
     # print("\nFinal model evaluation:", flush=True)
