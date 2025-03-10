@@ -649,7 +649,7 @@ def train_model_vs_itself():
         print("No existing model found, starting fresh", flush=True)
 
     # Training parameters
-    num_episodes = 100
+    num_episodes = 10000
     evaluation_frequency = 20  # Evaluate every N episodes
     puct_iterations = 1600  # Iterations for PUCT search
     losses = []

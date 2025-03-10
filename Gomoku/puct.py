@@ -13,7 +13,7 @@ from gomoku import Gomoku, BOARD_SIZE, BOARD_TENSOR, POLICY_PROBS, STATUS
 import os
 BEST_MODEL_PATH = os.path.join("models", "model_best.pt")
 TIC_TAC_TOE = os.path.join("models", "model_best_tic_tac_toe_v2.pt")
-N_HISTORY = 1
+N_HISTORY = 3
 
 
 class PUCTNode:
