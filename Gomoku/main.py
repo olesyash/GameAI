@@ -18,7 +18,7 @@ MCTS_ITERATIONS = 7000
 PUCT_ITERATIONS = 7000
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}", flush=True)
-evaluation_frequency = 100
+evaluation_frequency = 20
 
 
 def initialize_network(value_weight=3.0):
@@ -210,7 +210,7 @@ def train_model(num_games=1, generate_game_only=False):
                 value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
 
                 # Perform a training step with the batch
-                batch_loss = network.train_step(state_batch, policy_batch, value_batch)
+                batch_loss, _, _ = network.train_step(state_batch, policy_batch, value_batch)
                 epoch_loss += batch_loss
 
             if num_batches > 0:  # Only update loss if we had batches
@@ -885,8 +885,8 @@ if __name__ == "__main__":
     # Train the model using self-play with PUCT
     #trained_network = train_model_vs_itself()
     # Generate games data only
-    # train_model(num_games=10000, generate_game_only=True)
-    trained_network = train_from_data_file(value_weight=3.0)
+    train_model(num_games=1000, generate_game_only=False)
+    # trained_network = train_from_data_file(value_weight=3.0)
 
     # Final evaluation
     # print("\nFinal model evaluation:", flush=True)
