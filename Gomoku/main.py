@@ -113,7 +113,7 @@ def train_model(num_games=1, generate_game_only=False):
             # Store state and Q-value from MCTS
             current_state = game.clone()
             states_this_game.append(current_state)
-            values_this_game.append(root2.value / max(1, root2.visits))  # Normalize value
+            values_this_game.append(-root2.value / max(1, root2.visits))  # Normalize value
 
             # Make the move
             move2 = best_node2.state.last_move
