@@ -14,17 +14,76 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-MCTS_ITERATIONS = 7000
+MCTS_ITERATIONS = 10000
 PUCT_ITERATIONS = 7000
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}", flush=True)
-evaluation_frequency = 20
+evaluation_frequency = 50
+def generate_games(num_games=100, filename="training_data1.json"):
+    """Generate training data using self-play and save only unique games to a JSON file."""
+    all_data = []
+    unique_games = set()  # Track unique games by their move sequences
 
+    for i in range(num_games):
+        game = Gomoku()
+        mcts = MCTSPlayer(exploration_weight=1.4)
 
+        states_this_game = []
+        moves_this_game = []
+        policies_this_game = []
+        values_this_game = []
+
+        while not game.is_game_over():
+            best_node, root = mcts.search(game, iterations=10000)
+            move = best_node.state.last_move
+
+            if not game.make_move(move):
+                print("Invalid move detected, skipping...")
+                break
+
+            states_this_game.append(game.clone())
+            moves_this_game.append((move, game.get_current_player()))
+
+            # Compute policy from visit counts
+            policy = np.zeros(BOARD_SIZE * BOARD_SIZE)
+            total_visits = sum(child.visits for child in root.children)  
+            if total_visits > 0:
+                for child in root.children:
+                    move_idx = child.state.last_move[0] * BOARD_SIZE + child.state.last_move[1]
+                    policy[move_idx] = child.visits / total_visits  
+            policies_this_game.append(policy.tolist())
+
+            # Store value estimate
+            values_this_game.append(root.value / max(1, root.visits))
+
+        # Convert move sequence to string for uniqueness check
+        game_moves_str = str(moves_this_game)
+        if game_moves_str in unique_games:
+            print(f"⚠️ Duplicate game detected. Skipping game {i}.")
+            continue  # Skip saving duplicate games
+
+        unique_games.add(game_moves_str)
+
+        game_data = {
+            "moves": moves_this_game,
+            "policies": policies_this_game,
+            "mcts_q_values": values_this_game,
+            "winner": game.get_winner(),
+            "board_size": BOARD_SIZE
+        }
+
+        all_data.append(game_data)
+        print(f"✅ Unique game {i} saved.")
+
+    # Save only unique games
+    with open(filename, "w") as f:
+        json.dump(all_data, f, indent=4)
+
+    print(f"✅ Generated and saved {len(all_data)} unique games to {filename}.")
 def initialize_network(value_weight=3.0):
     # Initialize game and network
     # Training parameters
-    learning_rate = 0.01
+    learning_rate = 0.001
     num_stack = 3  # Number of historical states to stack
 
     network = GameNetwork(board_size=BOARD_SIZE, device=device, num_stack=num_stack, learning_rate=learning_rate)
@@ -244,99 +303,6 @@ def train_model(num_games=1, generate_game_only=False):
     return network
 
 
-def train_from_data_file(value_weight=3.0):
-    best_win_rate = 0
-    losses = []
-    value_losses = []
-    policy_losses = []
-    network = initialize_network(value_weight=value_weight)
-    all_states, all_policies, all_values = load_games()
-    start_time = time.time()
-
-    # Train once on collected data
-    if len(all_states) == 0:  # Check for empty dataset
-        print("Warning: No training data available! Skipping training.")
-        return network  # Exit training early
-
-    # Convert to numpy arrays for efficient shuffling
-    states_array = np.array(all_states)
-    policies_array = np.array(all_policies)
-    values_array = np.array(all_values)
-
-    batch_size = min(64, len(states_array))  # Ensure batch size isn't larger than dataset
-    if batch_size == 0:
-        print("Warning: No data to train on! Skipping training.")
-        return network
-
-    num_epochs = 10000  # Number of times to shuffle and train on all data
-    num_batches = max(1, len(states_array) // batch_size)  # At least 1 batch
-    total_batches = num_batches * num_epochs
-
-    # Train for multiple epochs, shuffling data each time
-    for epoch in range(num_epochs):
-        # Shuffle all arrays using the same permutation
-        shuffle_indices = np.random.permutation(len(states_array))
-        shuffled_states = states_array[shuffle_indices]
-        shuffled_policies = policies_array[shuffle_indices]
-        shuffled_values = values_array[shuffle_indices]
-
-        epoch_loss = 0
-        epoch_value_loss = 0
-        epoch_policy_loss = 0
-
-        for batch_idx in range(num_batches):
-            start_idx = batch_idx * batch_size
-            end_idx = min(start_idx + batch_size, len(shuffled_states))  # Ensure we don't go past array bounds
-
-            # Skip empty batches
-            if end_idx <= start_idx:
-                continue
-
-            # Create batch tensors from shuffled arrays
-            state_batch = torch.stack([shuffled_states[i].encode().to(device) for i in range(start_idx, end_idx)])
-            policy_batch = torch.stack(
-                [torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)])
-            value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
-
-            # Perform a training step with the batch
-            batch_loss, batch_value_loss, batch_policy_loss = network.train_step(state_batch, policy_batch, value_batch)
-            epoch_loss += batch_loss
-            epoch_value_loss += batch_value_loss
-            epoch_policy_loss += batch_policy_loss
-
-        if num_batches > 0:  # Only update loss if we had batches
-            avg_epoch_loss = epoch_loss / num_batches
-            avg_value_loss = epoch_value_loss / num_batches
-            avg_policy_loss = epoch_policy_loss / num_batches
-            
-            losses.append(avg_epoch_loss)  # Store loss for this epoch
-            value_losses.append(avg_value_loss)
-            policy_losses.append(avg_policy_loss)
-            
-            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_epoch_loss:.4f}, Value Loss: {avg_value_loss:.4f}, Policy Loss: {avg_policy_loss:.4f}", flush=True)
-
-        # Save latest model and plot loss
-        network.save_model("models/model_latest.pt")
-        if (epoch + 1) % 5 == 0:
-            plot_training_loss(losses, value_losses, policy_losses)
-
-        # Evaluate model periodically
-        if (epoch + 1) % evaluation_frequency == 0:
-            print(f"\nEvaluating model after epoch {epoch + 1}...", flush=True)
-            win_rate = evaluate_model(network)
-
-            # Save if it's the best model so far
-            if win_rate >= best_win_rate:
-                best_win_rate = win_rate
-                network.save_model("models/model_best.pt")
-                print(f"New best model saved! Win rate: {win_rate:.2%}", flush=True)
-
-            end_time = time.time()
-            print(f"Epoch {epoch + 1} completed in {end_time - start_time:.2f} seconds", flush=True)
-            start_time = time.time()  # Reset timer for next evaluation period
-
-    return network
-
 
 def evaluate_model(network, num_games=10):
     """Evaluate model by playing games against MCTS"""
@@ -494,18 +460,18 @@ def save_game_data(game_data, filename="training_data.json"):
     with open(filename, 'w') as f:
         f.write(json_str)
 
+import numpy as np
+import json
+from gomoku import Gomoku
 
 def load_games(filename="training_data.json"):
-    """Load games from saved JSON file and create game states for each move.
-    
+    """Load games from saved JSON file and remove duplicates.
+
     Args:
         filename (str): Name of file to load from
-        
+
     Returns:
-        tuple: (all_states, all_policies, all_values) where:
-            - all_states is list of board states (numpy arrays)
-            - all_policies is list of policy vectors from MCTS
-            - all_values is list of Q-values from MCTS
+        tuple: (all_states, all_policies, all_values)
     """
     try:
         with open(filename, 'r') as f:
@@ -517,50 +483,132 @@ def load_games(filename="training_data.json"):
     all_states = []
     all_policies = []
     all_values = []
-    
-    # Track unique games by their moves
-    unique_games = {}
+
+    unique_games = set()  # Track unique games
     duplicates = 0
-    
+
     for game_data in all_data:
-        # Create a unique key for this game based on its moves
-        moves_key = str(game_data["moves"])
-        
-        # Skip duplicate games
-        if moves_key in unique_games:
+        game_moves = str(game_data["moves"])
+
+        # Skip duplicates
+        if game_moves in unique_games:
             duplicates += 1
             continue
-            
-        # Mark this game as processed
-        unique_games[moves_key] = True
-        
-        # For each move in the game, create a state
+        unique_games.add(game_moves)
+
         game = Gomoku(board_size=game_data["board_size"])
-        moves_so_far = []  # Keep track of moves to restore game state
+        moves_so_far = []
 
         for i, ((move_x, move_y), player) in enumerate(game_data["moves"]):
-            # Save current board state
             game_copy = Gomoku(board_size=game_data["board_size"])
             game_copy.board = game.board.copy()
-            game_copy.move_history = moves_so_far.copy()  # Copy current move history
+            game_copy.move_history = moves_so_far.copy()
             all_states.append(game_copy)
 
-            # Get policy and Q-value for this move
             policy = np.array(game_data["policies"][i]) if game_data["policies"][i] is not None else None
             q_value = float(game_data["mcts_q_values"][i]) if game_data["mcts_q_values"][i] is not None else None
 
             all_policies.append(policy)
             all_values.append(q_value)
 
-            # Update board and move history for next state
             game.board[move_x][move_y] = player
             moves_so_far.append(((move_x, move_y), player))
 
-    print(f"Successfully loaded {len(all_states)} states from {len(unique_games)} unique games")
+    print(f"✅ Loaded {len(all_states)} unique training samples.")
     if duplicates > 0:
-        print(f"Skipped {duplicates} duplicate games")
-    
+        print(f"⚠️ Skipped {duplicates} duplicate games.")
+
     return all_states, all_policies, all_values
+
+
+def train_from_data_file(value_weight=3.0, num_epochs=1000, batch_size=64, filename="training_data1.json"):
+    """Train the model using training data loaded from a file."""
+    print(f"🔄 Loading training data from {filename}...")
+    all_states, all_policies, all_values = load_games(filename)
+
+    if not all_states:
+        print("⚠️ No training data available. Skipping training.")
+        return
+
+    # Initialize network
+    network = GameNetwork(board_size=BOARD_SIZE, device=device)
+    network.to(device)
+
+    # Load existing model if available
+    try:
+        network.load_model("models/model_best.pt")
+        print("✅ Loaded pre-trained model.")
+    except:
+        print("⚠️ No existing model found. Training from scratch.")
+
+    # Initialize best win rate
+    best_win_rate = 0
+
+    # Convert data to tensors
+    states_array = np.array(all_states)
+    policies_array = np.array(all_policies)
+    values_array = np.array(all_values)
+
+    num_batches = max(1, len(states_array) // batch_size)
+
+    # Initialize start time
+    start_time = time.time()
+
+    # Training loop
+    print(f"🚀 Starting training for {num_epochs} epochs...")
+    for epoch in range(num_epochs):
+        # Shuffle training data
+        shuffle_indices = np.random.permutation(len(states_array))
+        shuffled_states = states_array[shuffle_indices]
+        shuffled_policies = policies_array[shuffle_indices]
+        shuffled_values = values_array[shuffle_indices]
+
+        epoch_loss = 0
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min(start_idx + batch_size, len(shuffled_states))
+
+            # Skip empty batches
+            if end_idx <= start_idx:
+                continue
+
+            # Convert to PyTorch tensors
+            state_batch = torch.stack([shuffled_states[i].encode().to(device) for i in range(start_idx, end_idx)])
+            policy_batch = torch.stack(
+                [torch.from_numpy(shuffled_policies[i]).float().to(device) for i in range(start_idx, end_idx)]
+            )
+            value_batch = torch.tensor(shuffled_values[start_idx:end_idx], dtype=torch.float32, device=device)
+
+            # Perform training step
+            batch_loss, batch_value_loss, batch_policy_loss = network.train_step(state_batch, policy_batch, value_batch)
+            epoch_loss += batch_loss
+
+        avg_loss = epoch_loss / num_batches
+        print(f"Epoch {epoch + 1}/{num_epochs} - Loss: {avg_loss:.4f}")
+        
+        if (epoch + 1) % evaluation_frequency == 0:
+            print(f"\nEvaluating model after epoch {epoch + 1}...", flush=True)
+            win_rate = evaluate_model(network)
+
+            # Save if it's the best model so far
+            if win_rate >= best_win_rate:
+                best_win_rate = win_rate
+                network.save_model("models/model_best.pt")
+                print(f"New best model saved! Win rate: {win_rate:.2%}", flush=True)
+
+            end_time = time.time()
+            print(f"Epoch {epoch + 1} completed in {end_time - start_time:.2f} seconds", flush=True)
+            start_time = time.time()  # Reset timer for next evaluation period
+
+        # Save the model periodically
+        if (epoch + 1) % 5 == 0:
+            network.save_model("models/model_latest.pt")
+
+    # Save final trained model
+    network.save_model("models/model_best.pt")
+    print(f"✅ Training complete! Model saved as 'models/model_best.pt'.")
+
+
 
 
 def play_game1(puct, mcts):
@@ -877,6 +925,10 @@ def plot_elo_history(elo_system, save_path="plots/elo_history.png"):
 if __name__ == "__main__":
     # Set random seed for reproducibility
     torch.manual_seed(42)
+    generate_games(2000, "training_data1.json")
+    train_from_data_file(num_epochs=5000, batch_size=128, filename="training_data1.json")
+
+
 
     # Run the diagnostic test
     # test_value_perspectives()
@@ -885,7 +937,7 @@ if __name__ == "__main__":
     # Train the model using self-play with PUCT
     #trained_network = train_model_vs_itself()
     # Generate games data only
-    train_model(num_games=1000, generate_game_only=False)
+    #train_model(num_games=1000, generate_game_only=False)
     # trained_network = train_from_data_file(value_weight=3.0)
 
     # Final evaluation
@@ -902,3 +954,4 @@ if __name__ == "__main__":
     #     "Final_Model", "BestPuct_Model",
     #     num_games=50, board_size=BOARD_SIZE
     # )
+    
